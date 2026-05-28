@@ -1,0 +1,40 @@
+import { Router } from 'express';
+import { asyncHandler } from '../../common/utils/async-handler';
+import { authenticate } from '../../middlewares/authenticate';
+import { authorize } from '../../middlewares/authorize';
+import { validateRequest } from '../../middlewares/validate-request';
+import { createEmployeeSchema, employeeIdParamSchema, updateEmployeeSchema } from '../employees/employee-management.validation';
+import { PortalReadController } from './portal-read.controller';
+
+const router = Router();
+const controller = new PortalReadController();
+
+router.get('/employee-directory', authenticate, authorize('employee.directory.read'), asyncHandler(controller.employeeDirectory));
+router.get('/employee-directory/:id', authenticate, authorize('employee.directory.read'), asyncHandler(controller.employeeDirectoryProfile));
+router.get('/user-management/users', authenticate, authorize('employee.user.manage'), asyncHandler(controller.userManagementEmployees));
+router.get('/user-management/options', authenticate, authorize('employee.user.manage'), asyncHandler(controller.employeeOptions));
+router.post('/user-management/users', authenticate, authorize('employee.user.manage'), validateRequest({ body: createEmployeeSchema }), asyncHandler(controller.createEmployee));
+router.patch('/user-management/users/:id', authenticate, authorize('employee.user.manage'), validateRequest({ params: employeeIdParamSchema, body: updateEmployeeSchema }), asyncHandler(controller.updateEmployee));
+router.delete('/user-management/users/:id', authenticate, authorize('employee.user.manage'), validateRequest({ params: employeeIdParamSchema }), asyncHandler(controller.deleteEmployee));
+router.get('/employees', authenticate, authorize('employee.user.manage'), asyncHandler(controller.userManagementEmployees));
+router.post('/employees', authenticate, authorize('employee.user.manage'), validateRequest({ body: createEmployeeSchema }), asyncHandler(controller.createEmployee));
+router.patch('/employees/:id', authenticate, authorize('employee.user.manage'), validateRequest({ params: employeeIdParamSchema, body: updateEmployeeSchema }), asyncHandler(controller.updateEmployee));
+router.delete('/employees/:id', authenticate, authorize('employee.user.manage'), validateRequest({ params: employeeIdParamSchema }), asyncHandler(controller.deleteEmployee));
+router.get('/attendance', authenticate, authorize('attendance.read'), asyncHandler(controller.attendance));
+router.post('/attendance/check-in', authenticate, authorize('attendance.write'), asyncHandler(controller.checkIn));
+router.post('/attendance/check-out', authenticate, authorize('attendance.write'), asyncHandler(controller.checkOut));
+router.get('/leaves', authenticate, authorize('leave.read'), asyncHandler(controller.leaves));
+router.get('/jobs', authenticate, authorize('job.read'), asyncHandler(controller.jobs));
+router.get('/interviews', authenticate, authorize('interview.manage'), asyncHandler(controller.interviews));
+router.get('/onboarding', authenticate, authorize('employee.write'), asyncHandler(controller.onboarding));
+router.get('/offer-letters', authenticate, authorize('job.write'), asyncHandler(controller.offerLetters));
+router.post('/offer-letters/generate', authenticate, authorize('job.write'), asyncHandler(controller.generateOfferLetter));
+router.get('/offer-letters/:id/download', authenticate, authorize('job.write'), asyncHandler(controller.downloadOfferLetter));
+router.get('/templates', authenticate, authorize('job.write'), asyncHandler(controller.templates));
+router.post('/templates', authenticate, authorize('job.write'), asyncHandler(controller.createTemplate));
+router.patch('/templates/:id', authenticate, authorize('job.write'), asyncHandler(controller.updateTemplate));
+router.get('/notifications', authenticate, asyncHandler(controller.notifications));
+router.get('/activity-logs', authenticate, authorize('rbac.manage'), asyncHandler(controller.activityLogs));
+router.get('/audit-logs', authenticate, authorize('rbac.manage'), asyncHandler(controller.auditLogs));
+
+export { router as portalReadRoutes };

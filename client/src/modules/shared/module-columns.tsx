@@ -1,0 +1,65 @@
+import type { ColumnDef } from '@tanstack/react-table';
+import { Badge } from '@/components/ui/badge';
+
+export type GenericRecord = Record<string, unknown>;
+
+function value(record: GenericRecord, key: string): string {
+  const raw = record[key];
+  return raw === null || raw === undefined ? '-' : String(raw);
+}
+
+export const genericColumns: ColumnDef<GenericRecord>[] = [
+  {
+    accessorKey: 'id',
+    header: 'ID',
+    cell: ({ row }) => <span className="font-mono text-xs text-muted-foreground">{value(row.original, 'id').slice(0, 12)}</span>
+  },
+  {
+    id: 'primary',
+    header: 'Primary',
+    cell: ({ row }) => (
+      <span className="font-medium text-foreground">
+        {value(row.original, 'title') !== '-' ? value(row.original, 'title') : value(row.original, 'name') !== '-' ? value(row.original, 'name') : value(row.original, 'userId')}
+      </span>
+    )
+  },
+  {
+    id: 'secondary',
+    header: 'Secondary',
+    cell: ({ row }) => value(row.original, 'email') !== '-' ? value(row.original, 'email') : value(row.original, 'department')
+  },
+  {
+    accessorKey: 'status',
+    header: 'Status',
+    cell: ({ row }) => <Badge variant="violet">{value(row.original, 'status')}</Badge>
+  },
+  {
+    accessorKey: 'createdAt',
+    header: 'Created',
+    cell: ({ row }) => value(row.original, 'createdAt')
+  }
+];
+
+export const employeeColumns: ColumnDef<GenericRecord>[] = [
+  {
+    accessorKey: 'employeeId',
+    header: 'Employee ID',
+    cell: ({ row }) => <span className="font-mono text-xs">{value(row.original, 'employeeId')}</span>
+  },
+  {
+    id: 'name',
+    header: 'Name',
+    cell: ({ row }) => (
+      <span className="font-medium text-foreground">
+        {value(row.original, 'firstName')} {value(row.original, 'lastName')}
+      </span>
+    )
+  },
+  { accessorKey: 'department', header: 'Department' },
+  { accessorKey: 'designation', header: 'Designation' },
+  {
+    accessorKey: 'status',
+    header: 'Status',
+    cell: ({ row }) => <Badge variant="success">{value(row.original, 'status')}</Badge>
+  }
+];
