@@ -1,6 +1,7 @@
 export type AuthUser = {
   id: string;
   userId: string;
+  employeeId?: string;
   roles: string[];
   permissions: string[];
   forcePasswordReset: boolean;

@@ -13,7 +13,9 @@ export const buttonVariants = cva(
         destructive: 'bg-destructive text-destructive-foreground hover:bg-rose-400',
         ghost: 'text-muted-foreground hover:bg-white/7 hover:text-foreground',
         outline: 'border border-border bg-white/[0.03] text-foreground hover:border-primary/40 hover:bg-primary/10',
-        premium: 'gradient-border bg-white/[0.04] text-foreground shadow-[0_0_32px_rgba(139,92,246,0.18)] hover:bg-white/[0.07]'
+        premium: 'gradient-border bg-white/[0.04] text-foreground shadow-[0_0_32px_rgba(139,92,246,0.18)] hover:bg-white/[0.07]',
+        success: "bg-emerald-600 text-white hover:bg-emerald-700",
+
       },
       size: {
         default: 'h-10 px-4',

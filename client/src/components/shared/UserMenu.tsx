@@ -1,5 +1,6 @@
 import { KeyRound, LogOut, UserCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,20 +12,38 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { authApi } from '@/services/api/auth.api';
+import { abortAllPendingRequests } from '@/services/api/http-client';
 import { useAuthStore } from '@/store/auth.store';
 
 export function UserMenu() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const refreshToken = useAuthStore((state) => state.refreshToken);
   const clearSession = useAuthStore((state) => state.clearSession);
 
-  const logout = () => {
-    const token = refreshToken ?? undefined;
-    clearSession();
-    navigate('/login', { replace: true });
-    toast.success('Logged out securely');
-    void authApi.logout(token).catch(() => undefined);
+  const logout = async () => {
+    try {
+      // Abort all pending requests
+      abortAllPendingRequests();
+
+      // Clear query client cache
+      queryClient.clear();
+
+      // Clear auth session
+      const token = refreshToken ?? undefined;
+      clearSession();
+
+      // Call logout API (non-blocking, fire-and-forget)
+      authApi.logout(token).catch(() => undefined);
+
+      // Navigate after clearing state
+      navigate('/login', { replace: true });
+      toast.success('Logged out securely');
+    } catch (error) {
+      console.error('Logout error:', error);
+      toast.error('Logout failed');
+    }
   };
 
   return (

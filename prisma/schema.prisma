@@ -7,96 +7,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserStatus {
-  ACTIVE
-  INACTIVE
-  LOCKED
-  PASSWORD_RESET_REQUIRED
-}
-
-enum EmployeeStatus {
-  ACTIVE
-  INACTIVE
-  ON_NOTICE
-  TERMINATED
-}
-
-enum EmploymentType {
-  FULL_TIME
-  PART_TIME
-  CONTRACT
-  INTERN
-  CONSULTANT
-}
-
-enum AttendanceStatus {
-  PRESENT
-  LATE
-  HALF_DAY
-  ABSENT
-}
-
-enum LeaveRequestStatus {
-  PENDING_TEAM_LEAD
-  PENDING_HR
-  APPROVED
-  REJECTED
-  CANCELLED
-}
-
-enum JobStatus {
-  DRAFT
-  PUBLISHED
-  UNPUBLISHED
-  CLOSED
-}
-
-enum ApplicationStage {
-  APPLIED
-  SCREENING
-  INTERVIEW_SCHEDULED
-  TECHNICAL_ROUND
-  HR_ROUND
-  SELECTED
-  REJECTED
-  OFFER_SENT
-  JOINED
-}
-
-enum InterviewStatus {
-  SCHEDULED
-  COMPLETED
-  CANCELLED
-  NO_SHOW
-}
-
-enum NotificationChannel {
-  IN_APP
-  EMAIL
-}
-
-enum StorageProvider {
-  CLOUDINARY
-  S3
-}
-
 model User {
-  id                  String       @id @default(uuid()) @db.Uuid
-  userId              String       @unique @db.VarChar(64)
+  id                  String               @id @default(uuid()) @db.Uuid
+  userId              String               @unique @db.VarChar(64)
   passwordHash        String
-  status              UserStatus   @default(PASSWORD_RESET_REQUIRED)
-  forcePasswordReset  Boolean      @default(true)
-  failedLoginAttempts Int          @default(0)
+  status              UserStatus           @default(PASSWORD_RESET_REQUIRED)
+  forcePasswordReset  Boolean              @default(true)
+  failedLoginAttempts Int                  @default(0)
   lockedUntil         DateTime?
   lastLoginAt         DateTime?
-  employeeId          String?      @unique @db.Uuid
-  employee            Employee?    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
-  roles               UserRole[]
+  employeeId          String?              @unique @db.Uuid
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  deletedAt           DateTime?
   sessions            AuthSession[]
   passwordResets      PasswordResetToken[]
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  deletedAt           DateTime?
+  roles               UserRole[]
+  employee            Employee?            @relation(fields: [employeeId], references: [id])
 
   @@index([status])
   @@index([deletedAt])
@@ -104,17 +31,17 @@ model User {
 }
 
 model Role {
-  id          String           @id @default(uuid()) @db.Uuid
-  code        String           @unique @db.VarChar(80)
-  name        String           @db.VarChar(120)
-  description String?
-  hierarchyLevel Int           @default(100)
-  isSystem    Boolean          @default(false)
-  users       UserRole[]
-  permissions RolePermission[]
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  deletedAt   DateTime?
+  id             String           @id @default(uuid()) @db.Uuid
+  code           String           @unique @db.VarChar(80)
+  name           String           @db.VarChar(120)
+  description    String?
+  isSystem       Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  deletedAt      DateTime?
+  hierarchyLevel Int              @default(100)
+  permissions    RolePermission[]
+  users          UserRole[]
 
   @@index([deletedAt])
   @@map("roles")
@@ -126,10 +53,10 @@ model Permission {
   resource    String           @db.VarChar(80)
   action      String           @db.VarChar(80)
   description String?
-  roles       RolePermission[]
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   deletedAt   DateTime?
+  roles       RolePermission[]
 
   @@index([resource, action])
   @@index([deletedAt])
@@ -139,9 +66,9 @@ model Permission {
 model UserRole {
   userId    String   @db.Uuid
   roleId    String   @db.Uuid
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
   @@map("user_roles")
@@ -150,9 +77,9 @@ model UserRole {
 model RolePermission {
   roleId       String     @db.Uuid
   permissionId String     @db.Uuid
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
   createdAt    DateTime   @default(now())
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
@@ -161,7 +88,6 @@ model RolePermission {
 model AuthSession {
   id               String    @id @default(uuid()) @db.Uuid
   userId           String    @db.Uuid
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   refreshTokenHash String
   familyId         String    @db.Uuid
   replacedById     String?   @db.Uuid
@@ -172,6 +98,7 @@ model AuthSession {
   revokedAt        DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([familyId])
@@ -182,11 +109,11 @@ model AuthSession {
 model PasswordResetToken {
   id        String    @id @default(uuid()) @db.Uuid
   userId    String    @db.Uuid
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash String
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
@@ -194,32 +121,35 @@ model PasswordResetToken {
 }
 
 model Employee {
-  id                 String       @id @default(uuid()) @db.Uuid
-  employeeId         String       @unique @db.VarChar(64)
-  firstName          String       @db.VarChar(120)
-  lastName           String       @db.VarChar(120)
-  email              String       @unique @db.VarChar(180)
-  phone              String?      @db.VarChar(40)
-  designation        String       @db.VarChar(140)
-  department         String       @db.VarChar(140)
-  joiningDate        DateTime
-  employmentType     EmploymentType
-  reportingManagerId String?      @db.Uuid
-  reportingManager   Employee?    @relation("ReportingManager", fields: [reportingManagerId], references: [id], onDelete: SetNull)
-  directReports      Employee[]   @relation("ReportingManager")
-  status             EmployeeStatus @default(ACTIVE)
-  profilePhoto       String?
-  emergencyContact   Json?
-  address            Json?
-  user               User?
-  leaveBalances      LeaveBalance[]
-  leaveRequests      LeaveRequest[] @relation("LeaveRequester")
-  approvals          LeaveApproval[] @relation("LeaveApprover")
-  attendanceRecords  AttendanceRecord[]
-  interviewAssignments Interview[] @relation("InterviewInterviewer")
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
-  deletedAt          DateTime?
+  id                      String                     @id @default(uuid()) @db.Uuid
+  employeeId              String                     @unique @db.VarChar(64)
+  firstName               String                     @db.VarChar(120)
+  lastName                String                     @db.VarChar(120)
+  email                   String                     @unique @db.VarChar(180)
+  phone                   String?                    @db.VarChar(40)
+  designation             String                     @db.VarChar(140)
+  department              String                     @db.VarChar(140)
+  joiningDate             DateTime
+  employmentType          EmploymentType
+  reportingManagerId      String?                    @db.Uuid
+  status                  EmployeeStatus             @default(ACTIVE)
+  profilePhoto            String?
+  emergencyContact        Json?
+  address                 Json?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+  deletedAt               DateTime?
+  attendanceRecords       AttendanceRecord[]
+  regularizationRequests  AttendanceRegularization[]
+  reviewedRegularizations AttendanceRegularization[] @relation("RegularizationReviewer")
+  reportingManager        Employee?                  @relation("ReportingManager", fields: [reportingManagerId], references: [id])
+  directReports           Employee[]                 @relation("ReportingManager")
+  interviewAssignments    Interview[]                @relation("InterviewInterviewer")
+  approvals               LeaveApproval[]            @relation("LeaveApprover")
+  leaveBalances           LeaveBalance[]
+  createdCalendarEvents   LeaveCalendarEvent[]       @relation("CalendarEventCreator")
+  leaveRequests           LeaveRequest[]             @relation("LeaveRequester")
+  user                    User?
 
   @@index([department])
   @@index([status])
@@ -228,52 +158,102 @@ model Employee {
   @@map("employees")
 }
 
+model AppConfig {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique @db.VarChar(120)
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("app_configs")
+}
+
 model AttendanceSetting {
-  id             String   @id @default(uuid()) @db.Uuid
-  officeStart    String   @db.VarChar(8)
-  officeEnd      String   @db.VarChar(8)
-  graceMinutes   Int      @default(10)
-  workingDays    Json
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  deletedAt      DateTime?
+  id           String    @id @default(uuid()) @db.Uuid
+  officeStart  String    @db.VarChar(8)
+  officeEnd    String    @db.VarChar(8)
+  graceMinutes Int       @default(10)
+  workingDays  Json
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
 
   @@index([isActive])
   @@map("attendance_settings")
 }
 
+model AttendanceRegularization {
+  id                String    @id @default(uuid()) @db.Uuid
+  employeeId        String    @db.Uuid
+  attendanceDate    DateTime
+  requestedCheckIn  DateTime?
+  requestedCheckOut DateTime?
+  reason            String
+  status            String    @db.VarChar(40)
+  remarks           String?
+  reviewedById      String?   @db.Uuid
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  employee          Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewedBy        Employee? @relation("RegularizationReviewer", fields: [reviewedById], references: [id])
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([attendanceDate])
+  @@index([reviewedById])
+  @@map("attendance_regularizations")
+}
+
+model LeaveCalendarEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  title       String    @db.VarChar(180)
+  date        DateTime
+  type        String    @db.VarChar(80)
+  description String?
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  createdBy   Employee? @relation("CalendarEventCreator", fields: [createdById], references: [id])
+
+  @@index([date])
+  @@index([createdById])
+  @@map("leave_calendar_events")
+}
+
 model OfficeLocation {
-  id              String   @id @default(uuid()) @db.Uuid
-  name            String   @db.VarChar(120)
-  latitude        Decimal  @db.Decimal(10, 7)
-  longitude       Decimal  @db.Decimal(10, 7)
-  allowedRadiusM  Int
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  deletedAt       DateTime?
+  id             String    @id @default(uuid()) @db.Uuid
+  name           String    @db.VarChar(120)
+  latitude       Decimal   @db.Decimal(10, 7)
+  longitude      Decimal   @db.Decimal(10, 7)
+  allowedRadiusM Int
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
 
   @@index([isActive])
   @@map("office_locations")
 }
 
 model AttendanceRecord {
-  id             String           @id @default(uuid()) @db.Uuid
-  employeeId     String           @db.Uuid
-  employee       Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  id             String            @id @default(uuid()) @db.Uuid
+  employeeId     String            @db.Uuid
   attendanceDate DateTime
   checkInAt      DateTime?
   checkOutAt     DateTime?
-  workMinutes    Int              @default(0)
-  breakMinutes   Int              @default(0)
+  workMinutes    Int               @default(0)
+  breakMinutes   Int               @default(0)
   status         AttendanceStatus  @default(ABSENT)
   checkInMeta    Json?
   checkOutMeta   Json?
-  breaks         AttendanceBreak[]
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
   deletedAt      DateTime?
+  breaks         AttendanceBreak[]
+  employee       Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, attendanceDate])
   @@index([attendanceDate])
@@ -284,11 +264,11 @@ model AttendanceRecord {
 model AttendanceBreak {
   id                 String           @id @default(uuid()) @db.Uuid
   attendanceRecordId String           @db.Uuid
-  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
   startedAt          DateTime
   endedAt            DateTime?
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
 
   @@index([attendanceRecordId])
   @@map("attendance_breaks")
@@ -301,27 +281,27 @@ model LeaveType {
   annualQuota Decimal        @db.Decimal(6, 2)
   isPaid      Boolean        @default(true)
   isActive    Boolean        @default(true)
-  balances    LeaveBalance[]
-  requests    LeaveRequest[]
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   deletedAt   DateTime?
+  balances    LeaveBalance[]
+  requests    LeaveRequest[]
 
   @@index([isActive])
   @@map("leave_types")
 }
 
 model LeaveBalance {
-  id           String    @id @default(uuid()) @db.Uuid
-  employeeId   String    @db.Uuid
-  leaveTypeId  String    @db.Uuid
-  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveType    LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
-  year         Int
-  allocated    Decimal   @db.Decimal(6, 2)
-  used         Decimal   @default(0) @db.Decimal(6, 2)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id          String    @id @default(uuid()) @db.Uuid
+  employeeId  String    @db.Uuid
+  leaveTypeId String    @db.Uuid
+  year        Int
+  allocated   Decimal   @db.Decimal(6, 2)
+  used        Decimal   @default(0) @db.Decimal(6, 2)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, leaveTypeId, year])
   @@map("leave_balances")
@@ -331,17 +311,17 @@ model LeaveRequest {
   id          String             @id @default(uuid()) @db.Uuid
   employeeId  String             @db.Uuid
   leaveTypeId String             @db.Uuid
-  employee    Employee           @relation("LeaveRequester", fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveType   LeaveType          @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
   startDate   DateTime
   endDate     DateTime
   days        Decimal            @db.Decimal(6, 2)
   reason      String?
   status      LeaveRequestStatus @default(PENDING_TEAM_LEAD)
-  approvals   LeaveApproval[]
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   deletedAt   DateTime?
+  approvals   LeaveApproval[]
+  employee    Employee           @relation("LeaveRequester", fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType   LeaveType          @relation(fields: [leaveTypeId], references: [id])
 
   @@index([employeeId])
   @@index([status])
@@ -353,14 +333,14 @@ model LeaveApproval {
   id             String       @id @default(uuid()) @db.Uuid
   leaveRequestId String       @db.Uuid
   approverId     String       @db.Uuid
-  approver       Employee     @relation("LeaveApprover", fields: [approverId], references: [id], onDelete: Restrict)
-  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
   level          Int
   decision       String       @db.VarChar(40)
   remarks        String?
   decidedAt      DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+  approver       Employee     @relation("LeaveApprover", fields: [approverId], references: [id])
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
 
   @@index([leaveRequestId])
   @@index([approverId])
@@ -380,10 +360,10 @@ model JobPosting {
   skills         Json
   status         JobStatus        @default(DRAFT)
   publishedAt    DateTime?
-  applications   JobApplication[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
   deletedAt      DateTime?
+  applications   JobApplication[]
 
   @@index([status])
   @@index([department])
@@ -403,11 +383,11 @@ model Candidate {
   portfolio    String?
   experience   Decimal?         @db.Decimal(5, 2)
   skills       Json?
-  applications JobApplication[]
-  documents    Document[]
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
   deletedAt    DateTime?
+  documents    Document[]
+  applications JobApplication[]
 
   @@index([email])
   @@index([deletedAt])
@@ -418,15 +398,17 @@ model JobApplication {
   id          String           @id @default(uuid()) @db.Uuid
   jobId       String           @db.Uuid
   candidateId String           @db.Uuid
-  job         JobPosting       @relation(fields: [jobId], references: [id], onDelete: Restrict)
-  candidate   Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   resumeUrl   String?
   coverLetter String?
   stage       ApplicationStage @default(APPLIED)
-  interviews  Interview[]
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   deletedAt   DateTime?
+  notes       String?
+  source      String?
+  interviews  Interview[]
+  candidate   Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  job         JobPosting       @relation(fields: [jobId], references: [id])
 
   @@unique([jobId, candidateId])
   @@index([stage])
@@ -438,8 +420,6 @@ model Interview {
   id            String          @id @default(uuid()) @db.Uuid
   applicationId String          @db.Uuid
   interviewerId String          @db.Uuid
-  application   JobApplication  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  interviewer   Employee        @relation("InterviewInterviewer", fields: [interviewerId], references: [id], onDelete: Restrict)
   scheduledAt   DateTime
   durationMins  Int             @default(60)
   mode          String          @db.VarChar(80)
@@ -451,6 +431,9 @@ model Interview {
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   deletedAt     DateTime?
+  notifiedAt    DateTime?
+  application   JobApplication  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  interviewer   Employee        @relation("InterviewInterviewer", fields: [interviewerId], references: [id])
 
   @@index([scheduledAt])
   @@index([interviewerId])
@@ -459,47 +442,49 @@ model Interview {
 }
 
 model Template {
-  id           String    @id @default(uuid()) @db.Uuid
-  name         String    @db.VarChar(160)
-  key          String    @unique @db.VarChar(120)
+  id           String        @id @default(uuid()) @db.Uuid
+  name         String        @db.VarChar(160)
+  key          String        @unique @db.VarChar(120)
   htmlContent  String
   cssContent   String?
   previewImage String?
-  offerLetters OfferLetter[]
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
   deletedAt    DateTime?
+  category     String?       @db.VarChar(80)
+  isDefault    Boolean       @default(false)
+  variables    String[]
+  offerLetters OfferLetter[]
 
+  @@index([isDefault])
   @@index([deletedAt])
   @@map("templates")
 }
 
 model OfferLetter {
   id           String    @id @default(uuid()) @db.Uuid
-  candidateId  String?   @db.Uuid
-  employeeId   String?   @db.Uuid
   templateId   String    @db.Uuid
-  template     Template  @relation(fields: [templateId], references: [id], onDelete: Restrict)
   variables    Json
   generatedUrl String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime?
+  status       String    @default("DRAFT") @db.VarChar(40)
+  template     Template  @relation(fields: [templateId], references: [id])
 
-  @@index([candidateId])
-  @@index([employeeId])
+  @@index([createdAt])
   @@map("offer_letters")
 }
 
 model OnboardingWorkflow {
-  id          String   @id @default(uuid()) @db.Uuid
-  candidateId String?  @db.Uuid
-  employeeId  String?  @db.Uuid
-  status      String   @db.VarChar(80)
-  currentStep Int      @default(1)
+  id          String    @id @default(uuid()) @db.Uuid
+  candidateId String?   @db.Uuid
+  employeeId  String?   @db.Uuid
+  status      String    @db.VarChar(80)
+  currentStep Int       @default(1)
   steps       Json
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   @@index([status])
@@ -515,12 +500,12 @@ model Document {
   sizeBytes    Int?
   uploadedById String?         @db.Uuid
   candidateId  String?         @db.Uuid
-  candidate    Candidate?      @relation(fields: [candidateId], references: [id], onDelete: SetNull)
   entityType   String?         @db.VarChar(80)
   entityId     String?         @db.Uuid
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   deletedAt    DateTime?
+  candidate    Candidate?      @relation(fields: [candidateId], references: [id])
 
   @@index([entityType, entityId])
   @@index([candidateId])
@@ -528,14 +513,14 @@ model Document {
 }
 
 model NotificationTemplate {
-  id        String   @id @default(uuid()) @db.Uuid
-  key       String   @unique @db.VarChar(120)
+  id        String              @id @default(uuid()) @db.Uuid
+  key       String              @unique @db.VarChar(120)
   channel   NotificationChannel
   subject   String?
   body      String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isActive  Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
   deletedAt DateTime?
 
   @@index([channel])
@@ -599,4 +584,79 @@ model AuditLog {
   @@index([event])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  LOCKED
+  PASSWORD_RESET_REQUIRED
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  ON_NOTICE
+  TERMINATED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+  CONSULTANT
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  HALF_DAY
+  ABSENT
+}
+
+enum LeaveRequestStatus {
+  PENDING_TEAM_LEAD
+  PENDING_HR
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum JobStatus {
+  DRAFT
+  PUBLISHED
+  UNPUBLISHED
+  CLOSED
+}
+
+enum ApplicationStage {
+  APPLIED
+  SCREENING
+  INTERVIEW_SCHEDULED
+  TECHNICAL_ROUND
+  HR_ROUND
+  SELECTED
+  REJECTED
+  OFFER_SENT
+  JOINED
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  RESCHEDULED
+  FEEDBACK_PENDING
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+enum StorageProvider {
+  CLOUDINARY
+  S3
 }

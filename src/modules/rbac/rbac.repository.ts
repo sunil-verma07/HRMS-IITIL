@@ -1,7 +1,17 @@
-import type { Prisma } from '@prisma/client';
-import { prisma } from '../../database/prisma';
-import { BadRequestError, ConflictError, NotFoundError } from '../../common/errors/app-error';
-import type { AssignRoleDto, AttachPermissionDto, CreateRoleDto, SetRolePermissionDto, UpdateRoleDto } from './rbac.validation';
+import type { Prisma } from "@prisma/client";
+import { prisma } from "../../database/prisma";
+import {
+  BadRequestError,
+  ConflictError,
+  NotFoundError,
+} from "../../common/errors/app-error";
+import type {
+  AssignRoleDto,
+  AttachPermissionDto,
+  CreateRoleDto,
+  SetRolePermissionDto,
+  UpdateRoleDto,
+} from "./rbac.validation";
 
 function toJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -9,33 +19,39 @@ function toJson(value: unknown): Prisma.InputJsonValue {
 
 export class RbacRepository {
   listRoles() {
-    return prisma.role.findMany({
-      where: { deletedAt: null },
-      orderBy: { name: 'asc' },
-      include: {
-        permissions: {
-          include: {
-            permission: true
-          }
-        }
-      }
-    }).then((roles) =>
-      roles.map((role) => ({
-        ...role,
-        status: role.isSystem ? 'SYSTEM' : 'ACTIVE'
-      }))
-    );
+    return prisma.role
+      .findMany({
+        where: { deletedAt: null },
+        orderBy: { name: "asc" },
+        include: {
+          permissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      })
+      .then((roles) =>
+        roles.map((role) => ({
+          ...role,
+          status: role.isSystem ? "SYSTEM" : "ACTIVE",
+        })),
+      );
   }
 
   async updateRole(id: string, input: UpdateRoleDto, actorUserId?: string) {
-    const existing = await prisma.role.findFirst({ where: { id, deletedAt: null } });
+    const existing = await prisma.role.findFirst({
+      where: { id, deletedAt: null },
+    });
 
     if (!existing) {
-      throw new NotFoundError('Role not found');
+      throw new NotFoundError("Role not found");
     }
 
     if (existing.isSystem && (input.code || input.hierarchyLevel)) {
-      throw new BadRequestError('System role code and hierarchy cannot be changed');
+      throw new BadRequestError(
+        "System role code and hierarchy cannot be changed",
+      );
     }
 
     return prisma.$transaction(async (tx) => {
@@ -44,20 +60,24 @@ export class RbacRepository {
         data: {
           ...(input.code ? { code: input.code } : {}),
           ...(input.name ? { name: input.name } : {}),
-          ...(input.description !== undefined ? { description: input.description || null } : {}),
-          ...(input.hierarchyLevel !== undefined ? { hierarchyLevel: input.hierarchyLevel } : {})
-        }
+          ...(input.description !== undefined
+            ? { description: input.description || null }
+            : {}),
+          ...(input.hierarchyLevel !== undefined
+            ? { hierarchyLevel: input.hierarchyLevel }
+            : {}),
+        },
       });
 
       await tx.activityLog.create({
         data: {
           actorUserId: actorUserId ?? null,
-          action: 'ROLE_UPDATED',
-          entityType: 'Role',
+          action: "ROLE_UPDATED",
+          entityType: "Role",
           entityId: id,
           oldValues: toJson(existing),
-          newValues: toJson(role)
-        }
+          newValues: toJson(role),
+        },
       });
 
       return role;
@@ -65,20 +85,26 @@ export class RbacRepository {
   }
 
   async deleteRole(id: string, actorUserId?: string): Promise<void> {
-    const existing = await prisma.role.findFirst({ where: { id, deletedAt: null } });
+    const existing = await prisma.role.findFirst({
+      where: { id, deletedAt: null },
+    });
 
     if (!existing) {
-      throw new NotFoundError('Role not found');
+      throw new NotFoundError("Role not found");
     }
 
     if (existing.isSystem) {
-      throw new BadRequestError('System roles cannot be deleted');
+      throw new BadRequestError("System roles cannot be deleted");
     }
 
-    const assignedUsers = await prisma.userRole.count({ where: { roleId: id } });
+    const assignedUsers = await prisma.userRole.count({
+      where: { roleId: id },
+    });
 
     if (assignedUsers > 0) {
-      throw new ConflictError('Role is assigned to users and cannot be deleted');
+      throw new ConflictError(
+        "Role is assigned to users and cannot be deleted",
+      );
     }
 
     await prisma.$transaction([
@@ -86,19 +112,19 @@ export class RbacRepository {
       prisma.activityLog.create({
         data: {
           actorUserId: actorUserId ?? null,
-          action: 'ROLE_DELETED',
-          entityType: 'Role',
+          action: "ROLE_DELETED",
+          entityType: "Role",
           entityId: id,
-          oldValues: toJson(existing)
-        }
-      })
+          oldValues: toJson(existing),
+        },
+      }),
     ]);
   }
 
   listPermissions() {
     return prisma.permission.findMany({
       where: { deletedAt: null },
-      orderBy: [{ resource: 'asc' }, { action: 'asc' }]
+      orderBy: [{ resource: "asc" }, { action: "asc" }],
     });
   }
 
@@ -108,20 +134,30 @@ export class RbacRepository {
         code: input.code,
         name: input.name,
         ...(input.description ? { description: input.description } : {}),
-        ...(input.hierarchyLevel !== undefined ? { hierarchyLevel: input.hierarchyLevel } : {})
-      }
+        ...(input.hierarchyLevel !== undefined
+          ? { hierarchyLevel: input.hierarchyLevel }
+          : {}),
+      },
     });
   }
 
-  async setRolePermission(roleId: string, permissionId: string, input: SetRolePermissionDto, actorUserId?: string): Promise<void> {
-    const role = await prisma.role.findFirst({ where: { id: roleId, deletedAt: null }, select: { id: true, isSystem: true } });
+  async setRolePermission(
+    roleId: string,
+    permissionId: string,
+    input: SetRolePermissionDto,
+    actorUserId?: string,
+  ): Promise<void> {
+    const role = await prisma.role.findFirst({
+      where: { id: roleId, deletedAt: null },
+      select: { id: true, isSystem: true },
+    });
 
     if (!role) {
-      throw new NotFoundError('Role not found');
+      throw new NotFoundError("Role not found");
     }
 
-    if (role.isSystem) {
-      throw new BadRequestError('System role permissions cannot be changed from the portal');
+    if (role.code === "SUPER_ADMIN") {
+      throw new BadRequestError("Super Admin permissions cannot be changed");
     }
 
     await prisma.$transaction(async (tx) => {
@@ -129,7 +165,7 @@ export class RbacRepository {
         await tx.rolePermission.upsert({
           where: { roleId_permissionId: { roleId, permissionId } },
           update: {},
-          create: { roleId, permissionId }
+          create: { roleId, permissionId },
         });
       } else {
         await tx.rolePermission.deleteMany({ where: { roleId, permissionId } });
@@ -138,11 +174,13 @@ export class RbacRepository {
       await tx.activityLog.create({
         data: {
           actorUserId: actorUserId ?? null,
-          action: input.enabled ? 'ROLE_PERMISSION_ATTACHED' : 'ROLE_PERMISSION_DETACHED',
-          entityType: 'Role',
+          action: input.enabled
+            ? "ROLE_PERMISSION_ATTACHED"
+            : "ROLE_PERMISSION_DETACHED",
+          entityType: "Role",
           entityId: roleId,
-          newValues: { permissionId, enabled: input.enabled }
-        }
+          newValues: { permissionId, enabled: input.enabled },
+        },
       });
     });
   }
@@ -150,7 +188,7 @@ export class RbacRepository {
   assignRole(input: AssignRoleDto): Promise<void> {
     return prisma.userRole
       .create({
-        data: input
+        data: input,
       })
       .then(() => undefined);
   }
@@ -160,8 +198,8 @@ export class RbacRepository {
       .create({
         data: {
           roleId: input.roleId,
-          permissionId: input.permissionId
-        }
+          permissionId: input.permissionId,
+        },
       })
       .then(() => undefined);
   }
@@ -172,8 +210,8 @@ export class RbacRepository {
         where: {
           userId,
           role: {
-            deletedAt: null
-          }
+            deletedAt: null,
+          },
         },
         select: {
           role: {
@@ -181,27 +219,29 @@ export class RbacRepository {
               permissions: {
                 where: {
                   permission: {
-                    deletedAt: null
-                  }
+                    deletedAt: null,
+                  },
                 },
                 select: {
                   permission: {
                     select: {
-                      code: true
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+                      code: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       })
       .then((roles) => [
         ...new Set(
           roles.flatMap((userRole) =>
-            userRole.role.permissions.map((rolePermission) => rolePermission.permission.code)
-          )
-        )
+            userRole.role.permissions.map(
+              (rolePermission) => rolePermission.permission.code,
+            ),
+          ),
+        ),
       ]);
   }
 
@@ -211,29 +251,27 @@ export class RbacRepository {
         where: {
           userId,
           role: {
-            deletedAt: null
-          }
+            deletedAt: null,
+          },
         },
         select: {
           role: {
             select: {
-              code: true
-            }
-          }
-        }
+              code: true,
+            },
+          },
+        },
       })
       .then((roles) => roles.map((userRole) => userRole.role.code));
   }
 
   findRoleHierarchyLevelByUserId(userId: string): Promise<number> {
-    return prisma
-      .$queryRaw<Array<{ hierarchyLevel: number }>>`
+    return prisma.$queryRaw<Array<{ hierarchyLevel: number }>>`
         SELECT MIN(r."hierarchyLevel")::int AS "hierarchyLevel"
         FROM "user_roles" ur
         INNER JOIN "roles" r ON r."id" = ur."roleId"
         WHERE ur."userId" = ${userId}::uuid
           AND r."deletedAt" IS NULL
-      `
-      .then((rows) => rows[0]?.hierarchyLevel ?? 100);
+      `.then((rows) => rows[0]?.hierarchyLevel ?? 100);
   }
 }

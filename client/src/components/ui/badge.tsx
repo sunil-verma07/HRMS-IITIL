@@ -9,8 +9,11 @@ const badgeVariants = cva('inline-flex items-center rounded-md px-2 py-1 text-xs
       success: 'bg-emerald-400/10 text-emerald-200 ring-emerald-400/24',
       warning: 'bg-amber-400/10 text-amber-200 ring-amber-400/24',
       danger: 'bg-rose-400/10 text-rose-200 ring-rose-400/24',
+      destructive: 'bg-rose-400/10 text-rose-200 ring-rose-400/24', // alias for danger
       muted: 'bg-white/6 text-muted-foreground ring-white/10',
-      violet: 'bg-violet-400/10 text-violet-200 ring-violet-400/24'
+      violet: 'bg-violet-400/10 text-violet-200 ring-violet-400/24',
+      secondary: 'bg-white/6 text-muted-foreground ring-white/10',
+      outline: 'border border-border bg-transparent text-foreground ring-0',
     }
   },
   defaultVariants: {

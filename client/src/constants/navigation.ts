@@ -20,7 +20,8 @@ import {
   UserCircle,
   UserCog,
   UserRoundCog,
-  UsersRound
+  UsersRound,
+  CheckSquare  
 } from 'lucide-react';
 import { permissions } from './permissions';
 
@@ -38,6 +39,7 @@ export const navigationItems: NavigationItem[] = [
   { label: 'User Management', path: '/user-management', icon: UserCog, permissions: [permissions.employeeUserManage], keywords: ['employees', 'hrms', 'sensitive', 'accounts'] },
   { label: 'Attendance', path: '/attendance', icon: CalendarCheck, permissions: [permissions.attendanceRead], keywords: ['check in', 'geo', 'calendar'] },
   { label: 'Leaves', path: '/leaves', icon: ClipboardCheck, permissions: [permissions.leaveRead], keywords: ['approval', 'balance', 'calendar'] },
+  { label: 'Leave Approvals', path: '/leave-approvals', icon: CheckSquare, permissions: [permissions.leaveApprove], keywords: ['pending', 'approve', 'reject', 'manager'] },
   { label: 'Recruitment', path: '/recruitment', icon: BriefcaseBusiness, permissions: [permissions.jobRead, permissions.applicationRead], keywords: ['ats', 'jobs', 'candidates'] },
   { label: 'Interviews', path: '/interviews', icon: FileClock, permissions: [permissions.interviewManage], keywords: ['schedule', 'feedback'] },
   { label: 'Onboarding', path: '/onboarding', icon: Sparkles, permissions: [permissions.employeeWrite], keywords: ['stepper', 'approval'] },

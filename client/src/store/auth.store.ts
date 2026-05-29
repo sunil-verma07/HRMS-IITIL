@@ -22,7 +22,16 @@ export const useAuthStore = create<AuthState>()(
       hasHydrated: false,
       setSession: (session) => set(session),
       setAccessToken: (accessToken) => set({ accessToken }),
-      clearSession: () => set({ accessToken: null, refreshToken: null, user: null }),
+      clearSession: () => {
+        // Clear all state
+        set({ accessToken: null, refreshToken: null, user: null });
+        // Clear localStorage
+        try {
+          localStorage.removeItem('iitil-auth');
+        } catch {
+          // Ignore errors
+        }
+      },
       setHasHydrated: (hasHydrated) => set({ hasHydrated })
     }),
     {

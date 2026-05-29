@@ -52,12 +52,12 @@ export const resourceApi = {
     return response.data.data;
   },
 
-  async create<TPayload, TResult>(path: string, payload: TPayload): Promise<TResult> {
+  async create<TPayload, TResult = TPayload>(path: string, payload: TPayload): Promise<TResult> {
     const response = await httpClient.post<ApiResponse<TResult>>(path, payload);
     return response.data.data;
   },
 
-  async update<TPayload, TResult>(path: string, id: string, payload: TPayload): Promise<TResult> {
+  async update<TPayload, TResult = TPayload>(path: string, id: string, payload: TPayload): Promise<TResult> {
     const response = await httpClient.patch<ApiResponse<TResult>>(`${path}/${id}`, payload);
     return response.data.data;
   },

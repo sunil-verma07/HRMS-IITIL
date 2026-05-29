@@ -4,7 +4,7 @@
   "private": true,
   "description": "Enterprise HRMS and ATS backend for IITIL Portal",
   "main": "dist/server.js",
-   "scripts": {
+  "scripts": {
     "dev": "nodemon --watch src --ext ts --exec tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
@@ -23,6 +23,7 @@
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "date-fns": "^4.3.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "express-rate-limit": "^7.4.1",
@@ -54,5 +55,8 @@
   },
   "engines": {
     "node": ">=20.11.0"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

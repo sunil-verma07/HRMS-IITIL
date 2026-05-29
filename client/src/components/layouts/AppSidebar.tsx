@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { authApi } from '@/services/api/auth.api';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
+import logo from '@/assets/logo.png';
 
 export function AppSidebar() {
   const navigate = useNavigate();
@@ -40,8 +41,8 @@ export function AppSidebar() {
             className={cn('flex items-center gap-3 rounded-xl text-left transition-colors hover:text-cyan-200', sidebarCollapsed && 'justify-center')}
             onClick={() => navigate('/dashboard')}
           >
-            <div className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-cyan-300 to-violet-400 text-sm font-black text-slate-950 shadow-[0_0_24px_rgba(34,211,238,0.25)]">
-              IT
+            <div className="grid size-20  flex justify-center items-center">
+              <img src={logo} alt="IITIL Logo" />
             </div>
             {!sidebarCollapsed ? (
               <div>

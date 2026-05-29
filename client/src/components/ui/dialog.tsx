@@ -46,3 +46,7 @@ export function DialogDescription({
 }: ComponentPropsWithoutRef<typeof DialogPrimitive.Description>) {
   return <DialogPrimitive.Description className={cn('text-sm text-muted-foreground', className)} {...props} />;
 }
+
+export function DialogFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn('flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2', className)} {...props} />;
+}
