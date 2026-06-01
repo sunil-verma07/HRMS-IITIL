@@ -1,5 +1,6 @@
 // src/modules/settings/SettingsPage.tsx - Updated version
-import { Building2, CalendarDays, Clock, Loader2, Plus, Save, Settings2, Trash2 } from 'lucide-react';
+import { addMonths, eachDayOfInterval, endOfMonth, format, getDay, isSameDay, startOfMonth, subMonths } from 'date-fns';
+import { Building2, CalendarDays, ChevronLeft, ChevronRight, Clock, Edit3, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -8,14 +9,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
+import { Textarea } from '@/components/ui/textarea';
 import { httpClient } from '@/services/api/http-client';
 import { endpoints } from '@/services/api/endpoints';
 import type { ApiResponse } from '@/types/api';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge'; 
+import { usePermissions } from '@/hooks/use-permissions';
+import { cn } from '@/lib/utils';
 
 type AttendanceSetting = {
   id: string;
@@ -32,6 +37,7 @@ type LeaveType = {
   annualQuota: number;
   isPaid: boolean;
   isActive: boolean;
+  deletedAt?: string;
 };
 
 type SettingsData = {
@@ -40,11 +46,20 @@ type SettingsData = {
   regularizationLimit: number;
 };
 
+type LeaveCalendarEvent = {
+  id: string;
+  title: string;
+  date: string;
+  type: string;
+  description?: string | null;
+};
+
 type FormState = {
   officeStart: string;
   officeEnd: string;
   graceMinutes: string;
   regularizationLimit: string;
+  workingDays?: string[];
 };
 
 const DEFAULT_FORM: FormState = {
@@ -53,6 +68,738 @@ const DEFAULT_FORM: FormState = {
   graceMinutes: '10',
   regularizationLimit: '5'
 };
+
+function HolidayCalendarManager() {
+  const queryClient = useQueryClient();
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
+  const [holidayDialogOpen, setHolidayDialogOpen] = useState(false);
+  const [editingHoliday, setEditingHoliday] = useState<LeaveCalendarEvent | null>(null);
+  const [holidayForm, setHolidayForm] = useState({
+    title: '',
+    date: '',
+    type: 'HOLIDAY',
+    description: '',
+  });
+
+  const {
+    data: holidayEventsRaw,
+    isLoading: holidaysLoading,
+    refetch: refetchHolidays,
+    error: holidaysError,
+  } = useQuery({
+    queryKey: ['settings-calendar-events'],
+    queryFn: async () => {
+      const response = await httpClient.get<ApiResponse<LeaveCalendarEvent[] | { items: LeaveCalendarEvent[] }>>(
+        endpoints.leaveCalendar,
+      );
+      const payload = response.data.data;
+      if (Array.isArray(payload)) return payload;
+      if (payload && typeof payload === 'object' && 'items' in payload && Array.isArray(payload.items)) {
+        return payload.items;
+      }
+      return [];
+    },
+    staleTime: 30_000,
+  });
+
+  const holidayEvents: LeaveCalendarEvent[] = Array.isArray(holidayEventsRaw) ? holidayEventsRaw : [];
+
+  const createHolidayMutation = useMutation({
+    mutationFn: async (data: { title: string; date: string; type: string; description?: string | null }) => {
+      const response = await httpClient.post(endpoints.leaveCalendar, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Holiday added successfully');
+      setHolidayDialogOpen(false);
+      setHolidayForm({ title: '', date: '', type: 'HOLIDAY', description: '' });
+      setEditingHoliday(null);
+      void queryClient.invalidateQueries({ queryKey: ['settings-calendar-events'] });
+      void refetchHolidays();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message ?? 'Failed to add holiday');
+    },
+  });
+
+  const updateHolidayMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: { title: string; date: string; type: string; description?: string | null } }) => {
+      const response = await httpClient.patch(`${endpoints.leaveCalendar}/${id}`, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Holiday updated');
+      setHolidayDialogOpen(false);
+      setEditingHoliday(null);
+      setHolidayForm({ title: '', date: '', type: 'HOLIDAY', description: '' });
+      void queryClient.invalidateQueries({ queryKey: ['settings-calendar-events'] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message ?? 'Failed to update holiday');
+    },
+  });
+
+  const deleteHolidayMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await httpClient.delete(`${endpoints.leaveCalendar}/${id}`);
+    },
+    onSuccess: () => {
+      toast.success('Holiday deleted');
+      void queryClient.invalidateQueries({ queryKey: ['settings-calendar-events'] });
+      void refetchHolidays();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message ?? 'Failed to delete holiday');
+    },
+  });
+
+  const handleHolidaySubmit = () => {
+    if (!holidayForm.title.trim()) {
+      toast.error('Title is required');
+      return;
+    }
+
+    if (!holidayForm.date) {
+      toast.error('Date is required');
+      return;
+    }
+
+    if (editingHoliday) {
+      const updatePayload: { title: string; date: string; type: string; description?: string | null } = {
+        title: holidayForm.title.trim(),
+        date: holidayForm.date,
+        type: holidayForm.type,
+      };
+      if (holidayForm.description.trim()) {
+        updatePayload.description = holidayForm.description.trim();
+      }
+
+      updateHolidayMutation.mutate({
+        id: editingHoliday.id,
+        data: updatePayload,
+      });
+      return;
+    }
+
+    const createPayload: { title: string; date: string; type: string; description?: string | null } = {
+      title: holidayForm.title.trim(),
+      date: holidayForm.date,
+      type: holidayForm.type,
+    };
+    if (holidayForm.description.trim()) {
+      createPayload.description = holidayForm.description.trim();
+    }
+
+    createHolidayMutation.mutate(createPayload);
+  };
+
+  const getEventsForDay = (day: Date): LeaveCalendarEvent[] => {
+    if (!day || Number.isNaN(day.getTime())) return [];
+
+    return holidayEvents.filter((event) => {
+      try {
+        if (!event?.date) return false;
+        const eventDate = new Date(event.date);
+        if (Number.isNaN(eventDate.getTime())) return false;
+        return isSameDay(eventDate, day);
+      } catch {
+        return false;
+      }
+    });
+  };
+
+  const getEventColor = (type: string): string => {
+    const colors: Record<string, string> = {
+      HOLIDAY: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+      FESTIVAL: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      OPTIONAL: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+      COMPANY: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+    };
+    return colors[type] || 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+  };
+
+  const monthLabel = (() => {
+    try {
+      return format(calendarMonth, 'MMMM yyyy');
+    } catch {
+      return 'Invalid month';
+    }
+  })();
+
+  return (
+    <SectionCard
+      title="Holiday Calendar"
+      description="Manage company holidays, festivals, and optional holidays."
+      actions={
+        <Button
+          size="sm"
+          onClick={() => {
+            setEditingHoliday(null);
+            setHolidayForm({ title: '', date: '', type: 'HOLIDAY', description: '' });
+            setHolidayDialogOpen(true);
+          }}
+        >
+          <Plus className="mr-2 size-4" />
+          Add Holiday
+        </Button>
+      }
+    >
+      {holidaysLoading ? (
+        <div className="space-y-3">
+          {[1, 2, 3].map((index) => (
+            <div key={index} className="h-16 animate-pulse rounded-lg bg-white/[0.04]" />
+          ))}
+        </div>
+      ) : holidaysError ? (
+        <div className="rounded-xl border border-rose-400/20 bg-rose-400/5 p-4 text-center">
+          <p className="text-sm text-rose-300">Failed to load calendar events.</p>
+          <Button variant="outline" size="sm" className="mt-2" onClick={() => void refetchHolidays()}>
+            Retry
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="mb-4 flex items-center justify-between">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => {
+                try {
+                  setCalendarMonth((prev) => subMonths(prev, 1));
+                } catch {
+                  setCalendarMonth(new Date());
+                }
+              }}
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <span className="text-base font-semibold">{monthLabel}</span>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => {
+                try {
+                  setCalendarMonth((prev) => addMonths(prev, 1));
+                } catch {
+                  setCalendarMonth(new Date());
+                }
+              }}
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+
+          <div className="mb-2 grid grid-cols-7 gap-1">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+              <div key={day} className="p-2 text-center text-xs font-medium text-muted-foreground">
+                {day}
+              </div>
+            ))}
+          </div>
+
+          {(() => {
+            try {
+              const monthStart = startOfMonth(calendarMonth);
+              const monthEnd = endOfMonth(calendarMonth);
+              const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
+              const startDayOfWeek = getDay(monthStart);
+              const blanks = Array(startDayOfWeek).fill(null);
+
+              return (
+                <div className="grid grid-cols-7 gap-1">
+                  {blanks.map((_, index) => (
+                    <div
+                      key={`blank-${index}`}
+                      className="min-h-[80px] rounded-lg border border-border/30 bg-white/[0.01] p-1"
+                    />
+                  ))}
+                  {days.map((day) => {
+                    const dayEvents = getEventsForDay(day);
+                    const isToday = isSameDay(day, new Date());
+                    const isWeekend = getDay(day) === 0 || getDay(day) === 6;
+
+                    return (
+                      <div
+                        key={day.toISOString()}
+                        className={cn(
+                          'min-h-[80px] rounded-lg border p-1.5',
+                          isToday
+                            ? 'border-cyan-500/50 bg-cyan-500/5'
+                            : isWeekend
+                              ? 'border-border/30 bg-white/[0.015]'
+                              : 'border-border/30 bg-white/[0.01]',
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            'mb-1 text-right text-xs',
+                            isToday ? 'font-bold text-cyan-400' : isWeekend ? 'text-white/30' : 'text-white/50',
+                          )}
+                        >
+                          {format(day, 'd')}
+                        </div>
+                        <div className="space-y-0.5">
+                          {dayEvents.map((event) => (
+                            <div
+                              key={event.id}
+                              className={cn(
+                                'group relative flex cursor-pointer items-center justify-between gap-1 rounded border px-1 py-0.5 text-[10px] leading-tight',
+                                getEventColor(event.type ?? 'HOLIDAY'),
+                              )}
+                            >
+                              <span className="flex-1 truncate">{event.title ?? 'Untitled'}</span>
+                              <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                                <button
+                                  type="button"
+                                  className="transition-colors hover:text-white"
+                                  onClick={(mouseEvent) => {
+                                    mouseEvent.stopPropagation();
+                                    let formattedDate = '';
+                                    try {
+                                      formattedDate = event.date ? format(new Date(event.date), 'yyyy-MM-dd') : '';
+                                    } catch {
+                                      formattedDate = '';
+                                    }
+
+                                    setEditingHoliday(event);
+                                    setHolidayForm({
+                                      title: event.title ?? '',
+                                      date: formattedDate,
+                                      type: event.type ?? 'HOLIDAY',
+                                      description: event.description ?? '',
+                                    });
+                                    setHolidayDialogOpen(true);
+                                  }}
+                                >
+                                  <Edit3 className="size-2.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="transition-colors hover:text-rose-400"
+                                  onClick={(mouseEvent) => {
+                                    mouseEvent.stopPropagation();
+                                    if (window.confirm(`Delete "${event.title}"?`)) {
+                                      deleteHolidayMutation.mutate(event.id);
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="size-2.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            } catch (error) {
+              console.error('Calendar render error:', error);
+              return (
+                <div className="rounded-xl border border-rose-400/20 bg-rose-400/5 p-4 text-center">
+                  <p className="text-sm text-rose-300">Calendar failed to render. Please refresh.</p>
+                </div>
+              );
+            }
+          })()}
+
+          <div className="mt-6">
+            <h3 className="mb-3 text-sm font-medium text-foreground">All Holidays ({holidayEvents.length})</h3>
+            {holidayEvents.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">No holidays added yet.</p>
+            ) : (
+              <div className="divide-y divide-border rounded-lg border border-border">
+                {holidayEvents
+                  .filter((event) => event?.id && event?.title)
+                  .sort((a, b) => {
+                    try {
+                      return new Date(a.date).getTime() - new Date(b.date).getTime();
+                    } catch {
+                      return 0;
+                    }
+                  })
+                  .map((event) => (
+                    <div key={event.id} className="flex items-center justify-between gap-4 p-3">
+                      <div className="flex items-center gap-3">
+                        <div className={cn('rounded border px-2 py-0.5 text-xs font-medium', getEventColor(event.type ?? 'HOLIDAY'))}>
+                          {event.type ?? 'HOLIDAY'}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{event.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(() => {
+                              try {
+                                return format(new Date(event.date), 'MMMM d, yyyy');
+                              } catch {
+                                return event.date ?? 'Unknown date';
+                              }
+                            })()}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
+                          onClick={() => {
+                            let formattedDate = '';
+                            try {
+                              formattedDate = event.date ? format(new Date(event.date), 'yyyy-MM-dd') : '';
+                            } catch {
+                              formattedDate = '';
+                            }
+
+                            setEditingHoliday(event);
+                            setHolidayForm({
+                              title: event.title ?? '',
+                              date: formattedDate,
+                              type: event.type ?? 'HOLIDAY',
+                              description: event.description ?? '',
+                            });
+                            setHolidayDialogOpen(true);
+                          }}
+                        >
+                          <Edit3 className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+                          onClick={() => {
+                            if (window.confirm(`Delete "${event.title}"?`)) {
+                              deleteHolidayMutation.mutate(event.id);
+                            }
+                          }}
+                          disabled={deleteHolidayMutation.isPending}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      <Dialog
+        open={holidayDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingHoliday(null);
+            setHolidayForm({ title: '', date: '', type: 'HOLIDAY', description: '' });
+          }
+          setHolidayDialogOpen(open);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingHoliday ? 'Edit Holiday' : 'Add Holiday'}</DialogTitle>
+            <DialogDescription>
+              {editingHoliday ? 'Update the holiday details.' : 'Add a new holiday to the company calendar.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label>Title *</Label>
+              <Input
+                placeholder="e.g., Diwali, Christmas, Company Day"
+                value={holidayForm.title}
+                onChange={(event) => setHolidayForm((prev) => ({ ...prev, title: event.target.value }))}
+                autoFocus
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Date *</Label>
+              <Input
+                type="date"
+                value={holidayForm.date}
+                onChange={(event) => setHolidayForm((prev) => ({ ...prev, date: event.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Type *</Label>
+              <Select
+                value={holidayForm.type}
+                onValueChange={(value) => setHolidayForm((prev) => ({ ...prev, type: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="HOLIDAY">National Holiday</SelectItem>
+                  <SelectItem value="FESTIVAL">Festival</SelectItem>
+                  <SelectItem value="OPTIONAL">Optional Holiday</SelectItem>
+                  <SelectItem value="COMPANY">Company Holiday</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Description (Optional)</Label>
+              <Textarea
+                placeholder="Additional information..."
+                value={holidayForm.description}
+                onChange={(event) => setHolidayForm((prev) => ({ ...prev, description: event.target.value }))}
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHolidayDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleHolidaySubmit}
+              disabled={
+                !holidayForm.title.trim() ||
+                !holidayForm.date ||
+                createHolidayMutation.isPending ||
+                updateHolidayMutation.isPending
+              }
+            >
+              {createHolidayMutation.isPending || updateHolidayMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Saving...
+                </>
+              ) : editingHoliday ? (
+                'Update Holiday'
+              ) : (
+                'Add Holiday'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </SectionCard>
+  );
+}
+
+function DepartmentsManager() {
+  const queryClient = useQueryClient();
+  const [deptDialogOpen, setDeptDialogOpen] = useState(false);
+  const [newDeptName, setNewDeptName] = useState('');
+  const [editingDept, setEditingDept] = useState<string | null>(null);
+  const [editDeptName, setEditDeptName] = useState('');
+
+  const {
+    data: departmentConfig,
+    isLoading: deptsLoading,
+    refetch: refetchDepts,
+  } = useQuery({
+    queryKey: ['config', 'hr.departments'],
+    queryFn: async () => {
+      const response = await httpClient.get<ApiResponse<{ key: string; value: string[] }>>(
+        endpoints.config.byKey('hr.departments'),
+      );
+      return response.data.data;
+    },
+    staleTime: 30_000,
+  });
+
+  const departments: string[] = Array.isArray(departmentConfig?.value) ? departmentConfig.value : [];
+
+  const saveDeptsMutation = useMutation({
+    mutationFn: async (updatedDepts: string[]) => {
+      const response = await httpClient.put(endpoints.config.byKey('hr.departments'), {
+        value: updatedDepts,
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['config', 'hr.departments'] });
+      void refetchDepts();
+      toast.success('Departments updated');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message ?? 'Failed to update departments');
+    },
+  });
+
+  const handleAddDepartment = () => {
+    const trimmed = newDeptName.trim();
+    if (!trimmed) {
+      toast.error('Department name cannot be empty');
+      return;
+    }
+    if (departments.includes(trimmed)) {
+      toast.error('Department already exists');
+      return;
+    }
+
+    saveDeptsMutation.mutate([...departments, trimmed]);
+    setNewDeptName('');
+    setDeptDialogOpen(false);
+  };
+
+  const handleDeleteDepartment = (deptName: string) => {
+    if (!window.confirm(`Delete department "${deptName}"? This cannot be undone.`)) {
+      return;
+    }
+
+    saveDeptsMutation.mutate(departments.filter((department) => department !== deptName));
+  };
+
+  const handleEditDepartment = () => {
+    const trimmed = editDeptName.trim();
+    if (!trimmed || !editingDept) {
+      return;
+    }
+
+    if (departments.includes(trimmed) && trimmed !== editingDept) {
+      toast.error('Department name already exists');
+      return;
+    }
+
+    saveDeptsMutation.mutate(departments.map((department) => (department === editingDept ? trimmed : department)));
+    setEditingDept(null);
+    setEditDeptName('');
+  };
+
+  return (
+    <SectionCard
+      title="Departments & Designations"
+      description="Manage master department list used across employee workflows."
+      actions={
+        <Button
+          size="sm"
+          onClick={() => {
+            setNewDeptName('');
+            setDeptDialogOpen(true);
+          }}
+        >
+          <Plus className="mr-2 size-4" />
+          Add Department
+        </Button>
+      }
+    >
+      {deptsLoading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map((index) => (
+            <div key={index} className="h-16 animate-pulse rounded-lg bg-white/[0.04]" />
+          ))}
+        </div>
+      ) : departments.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border p-8 text-center">
+          <Building2 className="mx-auto mb-3 size-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">No departments yet. Click "Add Department" to create one.</p>
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {departments.map((department) => (
+            <div key={department} className="rounded-xl border border-border bg-white/[0.03] p-4">
+              <div className="flex items-start justify-between gap-2">
+                {editingDept === department ? (
+                  <div className="flex flex-1 items-center gap-2">
+                    <Input
+                      value={editDeptName}
+                      onChange={(event) => setEditDeptName(event.target.value)}
+                      className="h-8 text-sm"
+                      autoFocus
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') handleEditDepartment();
+                        if (event.key === 'Escape') setEditingDept(null);
+                      }}
+                    />
+                    <Button size="sm" onClick={handleEditDepartment} disabled={saveDeptsMutation.isPending}>
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditingDept(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex-1">
+                      <p className="font-medium text-foreground">{department}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">Department</p>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={() => {
+                          setEditingDept(department);
+                          setEditDeptName(department);
+                        }}
+                      >
+                        <Edit3 className="size-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+                        onClick={() => handleDeleteDepartment(department)}
+                        disabled={saveDeptsMutation.isPending}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={deptDialogOpen} onOpenChange={setDeptDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Department</DialogTitle>
+            <DialogDescription>Enter a name for the new department.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="dept-name">Department Name *</Label>
+              <Input
+                id="dept-name"
+                placeholder="e.g., Engineering"
+                value={newDeptName}
+                onChange={(event) => setNewDeptName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleAddDepartment();
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeptDialogOpen(false);
+                setNewDeptName('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddDepartment}
+              disabled={!newDeptName.trim() || saveDeptsMutation.isPending}
+            >
+              {saveDeptsMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                'Add Department'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </SectionCard>
+  );
+}
 
 // Leave Types Manager Component
 function LeaveTypesManager({ leaveTypes, onUpdate }: { leaveTypes: LeaveType[]; onUpdate: () => void }) {
@@ -208,99 +955,13 @@ function LeaveTypesManager({ leaveTypes, onUpdate }: { leaveTypes: LeaveType[]; 
   );
 }
 
-// Config List Manager Component (for departments and designations)
-function ConfigListManager({ configKey, title, description, placeholder, icon }: {
-  configKey: string;
-  title: string;
-  description: string;
-  placeholder: string;
-  icon: React.ReactNode;
-}) {
-  const queryClient = useQueryClient();
-  const [newItem, setNewItem] = useState('');
-
-  const { data: items = [], isLoading } = useQuery<string[]>({
-    queryKey: ['config', configKey],
-    queryFn: async () => {
-      const res = await httpClient.get<ApiResponse<{ key: string; value: string[] }>>(endpoints.config.byKey(configKey));
-      return res.data.data.value ?? [];
-    },
-    staleTime: 30000
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: (value: string[]) => httpClient.put(endpoints.config.byKey(configKey), { value }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['config', configKey] });
-      toast.success(`${title} updated`);
-    },
-    onError: () => toast.error(`Failed to update ${title.toLowerCase()}`)
-  });
-
-  const handleAdd = () => {
-    const trimmed = newItem.trim();
-    if (!trimmed) return;
-    if (items.includes(trimmed)) {
-      toast.error(`"${trimmed}" already exists`);
-      return;
-    }
-    saveMutation.mutate([...items, trimmed]);
-    setNewItem('');
-  };
-
-  const handleRemove = (item: string) => {
-    saveMutation.mutate(items.filter((i) => i !== item));
-  };
-
-  return (
-    <SectionCard title={title} description={description}>
-      {icon}
-      <div className="space-y-4">
-        <div className="flex gap-2">
-          <Input
-            value={newItem}
-            onChange={(e) => setNewItem(e.target.value)}
-            placeholder={placeholder}
-            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            className="max-w-sm"
-            disabled={saveMutation.isPending}
-          />
-          <Button size="sm" onClick={handleAdd} disabled={!newItem.trim() || saveMutation.isPending}>
-            {saveMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-            Add
-          </Button>
-        </div>
-        {isLoading ? (
-          <div className="flex gap-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-8 w-24 animate-pulse rounded-lg bg-white/[0.06]" />
-            ))}
-          </div>
-        ) : items.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
-            No {title.toLowerCase()} added yet.
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {items.map((item) => (
-              <div key={item} className="flex items-center gap-1.5 rounded-lg border border-border bg-white/[0.04] px-3 py-1.5 text-sm">
-                <span>{item}</span>
-                <button type="button" onClick={() => handleRemove(item)} disabled={saveMutation.isPending} className="ml-0.5 text-muted-foreground transition-colors hover:text-rose-400">
-                  <Trash2 className="size-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </SectionCard>
-  );
-}
-
 export function SettingsPage() {
   const queryClient = useQueryClient();
+  const { roles } = usePermissions();
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   const [activeTab, setActiveTab] = useState('attendance');
+  const canManageDepartmentsDesignations = roles.includes('SUPER_ADMIN');
+  const canManageHolidayCalendar = roles.includes('SUPER_ADMIN') || roles.includes('PORTAL_ADMIN');
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['settings'],
@@ -393,7 +1054,8 @@ export function SettingsPage() {
           <TabsList>
             <TabsTrigger value="attendance">Attendance</TabsTrigger>
             <TabsTrigger value="leave">Leave Types</TabsTrigger>
-            <TabsTrigger value="departments">Departments & Designations</TabsTrigger>
+            {canManageDepartmentsDesignations ? <TabsTrigger value="departments-designations">Departments & Designations</TabsTrigger> : null}
+            {canManageHolidayCalendar ? <TabsTrigger value="holiday-calendar">Holiday Calendar</TabsTrigger> : null}
           </TabsList>
 
           <TabsContent value="attendance" className="mt-6 space-y-6">
@@ -461,24 +1123,17 @@ export function SettingsPage() {
             </SectionCard>
           </TabsContent>
 
-          <TabsContent value="departments" className="mt-6">
-            <div className="grid gap-5 xl:grid-cols-2">
-              <ConfigListManager
-                configKey="hr.departments"
-                title="Departments"
-                description="Manage the department list used in employee forms."
-                placeholder="e.g., Engineering"
-                icon={<Settings2 className="mb-5 size-5 text-cyan-200" />}
-              />
-              <ConfigListManager
-                configKey="hr.designations"
-                title="Designations"
-                description="Manage the designation list used in employee forms."
-                placeholder="e.g., Senior Software Engineer"
-                icon={<Settings2 className="mb-5 size-5 text-violet-200" />}
-              />
-            </div>
-          </TabsContent>
+          {canManageDepartmentsDesignations ? (
+            <TabsContent value="departments-designations" className="mt-6">
+              <DepartmentsManager />
+            </TabsContent>
+          ) : null}
+
+          {canManageHolidayCalendar ? (
+            <TabsContent value="holiday-calendar" className="mt-6">
+              <HolidayCalendarManager />
+            </TabsContent>
+          ) : null}
         </Tabs>
       </div>
     </PageTransition>

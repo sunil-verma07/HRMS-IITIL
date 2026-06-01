@@ -16,6 +16,9 @@ import { endpoints } from "@/services/api/endpoints";
 import { employeeApi } from "@/services/api/employee.api";
 import { OperationalModulePage } from "@/modules/shared/OperationalModulePage";
 import type { EmployeeFormValues } from "@/schemas/employee.schemas";
+import { permissions } from '@/constants/permissions';
+import { usePermissions } from '@/hooks/use-permissions';
+import { PermissionGate } from '@/components/guards/PermissionGate';
 import {
   EmployeeFormDialog,
   type EmployeeFormRecord,
@@ -27,6 +30,26 @@ type UserManagementEmployee = EmployeeFormRecord & Record<string, unknown>;
 
 export function UserManagementPage() {
   const queryClient = useQueryClient();
+  const currentUser = useAuthStore((s) => s.user);
+  const { can, canDo } = usePermissions();
+
+  const canCreate =
+    can(permissions.employeeCreate) ||
+    can(permissions.employeeUserManage) ||
+    canDo('employee', 'write') ||
+    canDo('employee', 'manage');
+  const canEdit =
+    can(permissions.employeeUpdate) ||
+    can(permissions.employeeUserManage) ||
+    canDo('employee', 'write') ||
+    canDo('employee', 'manage');
+  const canDelete =
+    can(permissions.employeeDelete) ||
+    can(permissions.employeeUserManage) ||
+    canDo('employee', 'manage') ||
+    canDo('employee', 'delete');
+  const showActionsColumn = canEdit || canDelete;
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] =
     useState<UserManagementEmployee | null>(null);
@@ -35,16 +58,21 @@ export function UserManagementPage() {
 
   const invalidateEmployees = () => {
     void queryClient.invalidateQueries({ queryKey: ["user-management"] });
+    void queryClient.invalidateQueries({ queryKey: ["departments-hierarchy"] });
+    void queryClient.invalidateQueries({ queryKey: ["people", "list"] });
   };
 
   const createMutation = useMutation({
-    mutationFn: employeeApi.create,
+    mutationFn: (values: EmployeeFormValues) => employeeApi.create(values),
     onSuccess: () => {
-      toast.success("Employee created");
+      toast.success('Employee created successfully');
       setDialogOpen(false);
+      setEditingEmployee(null);
       invalidateEmployees();
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error: Error) => {
+      toast.error(error.message ?? 'Failed to create employee');
+    },
   });
 
   const updateMutation = useMutation({
@@ -103,8 +131,8 @@ export function UserManagementPage() {
     onSettled: invalidateEmployees,
   });
 
-  const columns = useMemo<ColumnDef<UserManagementEmployee>[]>(
-    () => [
+  const columns = useMemo<ColumnDef<UserManagementEmployee>[]>(() => {
+    const baseColumns: ColumnDef<UserManagementEmployee>[] = [
       {
         accessorKey: "employeeId",
         header: "Employee ID",
@@ -119,7 +147,7 @@ export function UserManagementPage() {
         header: "Name",
         cell: ({ row }) => (
           <span className="font-medium text-foreground">
-            {String(row.original.firstName ?? "")}{" "}
+            {String(row.original.firstName ?? "")} {" "}
             {String(row.original.lastName ?? "")}
           </span>
         ),
@@ -133,23 +161,27 @@ export function UserManagementPage() {
           <Badge variant="success">{String(row.original.status ?? "-")}</Badge>
         ),
       },
-      {
-        id: "actions",
-        header: "Actions",
-        enableSorting: false,
-        cell: ({ row }) => {
-          const currentUser = useAuthStore((s) => s.user);
-          const emp = row.original;
-          const isSelf = currentUser?.employeeId === emp.id;
-          const isSuperAdmin =
-            (
-              emp.user as { roles?: { role: { code: string } }[] } | undefined
-            )?.roles?.some((r) => r.role.code === "SUPER_ADMIN") ?? false;
+    ];
 
-          if (isSelf || isSuperAdmin) return null;
+    if (!showActionsColumn) {
+      return baseColumns;
+    }
 
-          return (
-            <div className="flex items-center gap-2">
+    baseColumns.push({
+      id: "actions",
+      header: "Actions",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const emp = row.original;
+        const isSelf = currentUser?.employeeId === emp.id;
+
+        if (isSelf) return null;
+
+        return (
+          <div className="flex items-center gap-2">
+            <PermissionGate
+              permissions={[permissions.employeeUpdate, permissions.employeeUserManage]}
+            >
               <Button
                 size="sm"
                 variant="outline"
@@ -161,6 +193,8 @@ export function UserManagementPage() {
                 <Edit3 className="size-3.5" />
                 Edit
               </Button>
+            </PermissionGate>
+            <PermissionGate permissions={[permissions.employeeDelete, permissions.employeeUserManage]}>
               <Button
                 size="sm"
                 variant="destructive"
@@ -169,21 +203,27 @@ export function UserManagementPage() {
                 <Trash2 className="size-3.5" />
                 Delete
               </Button>
-            </div>
-          );
-        },
+            </PermissionGate>
+          </div>
+        );
       },
-    ],
-    [],
-  );
+    });
+
+    return baseColumns;
+  }, [currentUser?.employeeId, showActionsColumn]);
 
   const submitEmployee = (values: EmployeeFormValues) => {
+    const payload: EmployeeFormValues = {
+      ...values,
+      ...(values.reportingManagerId ? {} : { reportingManagerId: undefined }),
+    };
+
     if (editingEmployee?.id) {
-      updateMutation.mutate({ id: editingEmployee.id, values });
+      updateMutation.mutate({ id: editingEmployee.id, values: payload });
       return;
     }
 
-    createMutation.mutate(values);
+    createMutation.mutate(payload);
   };
 
   return (
@@ -201,10 +241,14 @@ export function UserManagementPage() {
           emptyTitle: "No manageable users",
           emptyDescription:
             "No users are manageable under your current role and hierarchy visibility policy.",
-          onCreate: () => {
-            setEditingEmployee(null);
-            setDialogOpen(true);
-          },
+          ...(canCreate
+            ? {
+                onCreate: () => {
+                  setEditingEmployee(null);
+                  setDialogOpen(true);
+                },
+              }
+            : {}),
           filters: [
             { key: "status", label: "Status", value: "Active" },
             {

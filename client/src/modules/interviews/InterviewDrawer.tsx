@@ -12,9 +12,6 @@ import {
   FileText,
   Link as LinkIcon,
   Loader2,
-  CheckCircle2,
-  AlertCircle,
-  CircleDot,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,15 +28,6 @@ const STATUS_STYLES: Record<string, string> = {
   NO_SHOW: "bg-orange-500/15 text-orange-300 border-orange-500/25",
   RESCHEDULED: "bg-violet-500/15 text-violet-300 border-violet-500/25",
   FEEDBACK_PENDING: "bg-amber-500/15 text-amber-300 border-amber-500/25",
-};
-
-const STATUS_ICON: Record<string, React.ElementType> = {
-  COMPLETED: CheckCircle2,
-  CANCELLED: AlertCircle,
-  NO_SHOW: AlertCircle,
-  SCHEDULED: CircleDot,
-  RESCHEDULED: CircleDot,
-  FEEDBACK_PENDING: CircleDot,
 };
 
 function DetailRow({

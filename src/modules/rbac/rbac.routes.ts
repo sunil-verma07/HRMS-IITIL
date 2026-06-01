@@ -8,6 +8,7 @@ import {
   assignRoleSchema,
   attachPermissionSchema,
   createRoleSchema,
+  updatePermissionMatrixSchema,
   roleIdParamSchema,
   rolePermissionParamSchema,
   setRolePermissionSchema,
@@ -23,6 +24,8 @@ router.post('/roles', validateRequest({ body: createRoleSchema }), asyncHandler(
 router.patch('/roles/:id', validateRequest({ params: roleIdParamSchema, body: updateRoleSchema }), asyncHandler(controller.updateRole));
 router.delete('/roles/:id', validateRequest({ params: roleIdParamSchema }), asyncHandler(controller.deleteRole));
 router.get('/permissions', asyncHandler(controller.listPermissions));
+router.get('/permission-matrix', asyncHandler(controller.getPermissionMatrix));
+router.put('/permission-matrix', validateRequest({ body: updatePermissionMatrixSchema }), asyncHandler(controller.updatePermissionMatrix));
 router.post('/assign-role', validateRequest({ body: assignRoleSchema }), asyncHandler(controller.assignRole));
 router.post('/attach-permission', validateRequest({ body: attachPermissionSchema }), asyncHandler(controller.attachPermission));
 router.put(

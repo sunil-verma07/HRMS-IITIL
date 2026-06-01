@@ -1,5 +1,5 @@
 // src/modules/recruitment/ScheduleInterviewModal.tsx
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -132,14 +132,14 @@ const panel = {
     opacity: 1,
     scale: 1,
     y: 0,
-    transition: { duration: 0.22, ease: "easeOut" },
+    transition: { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const },
   },
   exit: { opacity: 0, scale: 0.96, y: 8, transition: { duration: 0.15 } },
 };
 
 const slideIn = {
   hidden: { opacity: 0, x: 20 },
-  show: { opacity: 1, x: 0, transition: { duration: 0.18, ease: "easeOut" } },
+  show: { opacity: 1, x: 0, transition: { duration: 0.18, ease: [0.4, 0, 0.2, 1] as const } },
   exit: { opacity: 0, x: -20, transition: { duration: 0.12 } },
 };
 
@@ -229,11 +229,11 @@ function QuickAddForm({ onSuccess, onBack }: QuickAddFormProps) {
       firstName: values.firstName,
       lastName: values.lastName,
       email: values.email,
-      phone: values.phone || undefined,
+      ...(values.phone ? { phone: values.phone } : {}),
       jobId: values.jobId,
       source: values.source,
-      resumeUrl: values.resumeUrl || undefined,
-      notes: values.notes || undefined,
+      ...(values.resumeUrl ? { resumeUrl: values.resumeUrl } : {}),
+      ...(values.notes ? { notes: values.notes } : {}),
     });
 
     onSuccess(
@@ -545,7 +545,7 @@ export function ScheduleInterviewModal() {
       reset({
         candidateId: "",
         applicationId: (editingInterview as any).applicationId ?? "",
-        interviewerId: editingInterview.interviewer?.id ?? "",
+        interviewerId: ((editingInterview as { interviewerId?: string }).interviewerId ?? ""),
         date: format(dt, "yyyy-MM-dd"),
         time: format(dt, "HH:mm"),
         durationMins: (editingInterview as any).durationMins ?? 60,
@@ -590,8 +590,8 @@ export function ScheduleInterviewModal() {
           scheduledAt,
           durationMins: values.durationMins,
           mode: values.mode,
-          meetingLink: values.meetingLink || undefined,
-          notes: values.notes || undefined,
+          ...(values.meetingLink ? { meetingLink: values.meetingLink } : {}),
+          ...(values.notes ? { notes: values.notes } : {}),
         });
       } else if (modalMode === "edit" && editingInterview) {
         await updateMutation.mutateAsync({
@@ -600,8 +600,8 @@ export function ScheduleInterviewModal() {
             scheduledAt,
             durationMins: values.durationMins,
             mode: values.mode,
-            meetingLink: values.meetingLink || undefined,
-            notes: values.notes || undefined,
+            ...(values.meetingLink ? { meetingLink: values.meetingLink } : {}),
+            ...(values.notes ? { notes: values.notes } : {}),
           },
         });
       }

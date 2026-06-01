@@ -3,6 +3,7 @@ import {
   AttendanceStatus,
   EmployeeStatus,
   EmploymentType,
+  LeaveRequestStatus,
   type Prisma,
 } from "@prisma/client";
 import {
@@ -17,8 +18,10 @@ import {
 } from "../../common/errors/app-error";
 import { sendSuccess } from "../../common/http/api-response";
 import { HttpStatus } from "../../common/http/status-codes";
+import { interpolateTemplate, sanitizeHtml } from "../../common/utils/html";
 import { prisma } from "../../database/prisma";
 import type { AuthenticatedUser } from "../../types/authenticated-user";
+import { buildAttendanceScopeWhere, resolveAttendanceScope } from "../attendance/attendance-scope.policy";
 import {
   buildDirectoryVisibilityWhere,
   buildEmployeeSearchWhere,
@@ -70,6 +73,14 @@ function pageArgs(query: PaginationQuery): { skip: number; take: number } {
 
 function currentUser(request: Request): AuthenticatedUser {
   return request.user as AuthenticatedUser;
+}
+
+function requireParam(value: string | undefined, label: string): string {
+  if (!value) {
+    throw new BadRequestError(`${label} is required`);
+  }
+
+  return value;
 }
 
 function startOfToday(): Date {
@@ -458,25 +469,7 @@ export class PortalReadController {
   ): Promise<Response> => {
     const query = parsePagination(request);
     const user = currentUser(request);
-    const employeeVisibility = buildUserManagementVisibilityWhere(user);
-
-    const where: Prisma.AttendanceRecordWhereInput = {
-      deletedAt: null,
-      employee: employeeVisibility,
-    };
-
-    // If employee role, filter by their own records
-    if (
-      user.employeeId &&
-      !user.permissions.includes("employee.visibility.super_admin") &&
-      !user.roles.some((r) =>
-        ["HR_MANAGER", "HR_EXECUTIVE", "HR", "PORTAL_ADMIN", "ADMIN"].includes(
-          r,
-        ),
-      )
-    ) {
-      where.employeeId = user.employeeId;
-    }
+    const where = buildAttendanceScopeWhere(user);
 
     const [items, total] = await Promise.all([
       prisma.attendanceRecord.findMany({
@@ -667,6 +660,8 @@ export class PortalReadController {
       );
     }
 
+    const employeeId = user.employeeId;
+
     const { date, reason, requestedCheckIn, requestedCheckOut } = request.body;
 
     if (!date || !reason) {
@@ -685,7 +680,7 @@ export class PortalReadController {
 
     const monthlyCount = await prisma.attendanceRegularization.count({
       where: {
-        employeeId: user.employeeId,
+        employeeId,
         createdAt: { gte: startOfMonth },
         status: { in: ["PENDING", "APPROVED"] },
       },
@@ -700,7 +695,7 @@ export class PortalReadController {
     const regularization = await prisma.$transaction(async (tx) => {
       const record = await tx.attendanceRegularization.create({
         data: {
-          employeeId: user.employeeId,
+          employeeId,
           attendanceDate: new Date(date),
           requestedCheckIn: requestedCheckIn
             ? new Date(requestedCheckIn)
@@ -721,6 +716,7 @@ export class PortalReadController {
               reportingManager: {
                 select: {
                   id: true,
+                  userId: true,
                   firstName: true,
                   lastName: true,
                   email: true,
@@ -733,9 +729,14 @@ export class PortalReadController {
 
       // Create notification for reporting manager
       if (record.employee.reportingManager) {
+        const reportingManagerUserId = record.employee.reportingManager.userId;
+        if (!reportingManagerUserId) {
+          throw new BadRequestError("Reporting manager account is not linked");
+        }
+
         await tx.notification.create({
           data: {
-            userId: record.employee.reportingManager.id,
+            userId: reportingManagerUserId,
             channel: "IN_APP",
             title: "Attendance Regularization Request",
             body: `${record.employee.firstName} ${record.employee.lastName} has requested attendance regularization for ${new Date(date).toLocaleDateString()}`,
@@ -761,24 +762,27 @@ export class PortalReadController {
   ): Promise<Response> => {
     const user = currentUser(request);
     const query = parsePagination(request);
-
+    const attendanceScope = resolveAttendanceScope(user);
     const where: Prisma.AttendanceRegularizationWhereInput = {
       deletedAt: null,
+      ...(attendanceScope === "all"
+        ? {}
+        : attendanceScope === "department"
+          ? user.department
+            ? { employee: { department: user.department } }
+            : { employeeId: "__none__" }
+          : attendanceScope === "team"
+            ? {
+                OR: [
+                  ...(user.employeeId ? [{ employeeId: user.employeeId }] : []),
+                  ...(user.employeeId ? [{ employee: { reportingManagerId: user.employeeId } }] : []),
+                  ...(user.department ? [{ employee: { department: user.department } }] : []),
+                ],
+              }
+            : user.employeeId
+              ? { employeeId: user.employeeId }
+              : { employeeId: "__none__" }),
     };
-
-    // Employees see only their own
-    if (
-      !user.permissions.includes("employee.visibility.super_admin") &&
-      !user.roles.some((r) =>
-        ["HR_MANAGER", "HR_EXECUTIVE", "HR", "PORTAL_ADMIN", "ADMIN"].includes(
-          r,
-        ),
-      )
-    ) {
-      if (user.employeeId) {
-        where.employeeId = user.employeeId;
-      }
-    }
 
     const [items, total] = await Promise.all([
       prisma.attendanceRegularization.findMany({
@@ -815,7 +819,7 @@ export class PortalReadController {
     response: Response,
   ): Promise<Response> => {
     const user = currentUser(request);
-    const { id } = request.params;
+    const id = requireParam(request.params.id, "Regularization id");
     const { status, remarks } = request.body;
 
     if (!["APPROVED", "REJECTED"].includes(status)) {
@@ -828,11 +832,15 @@ export class PortalReadController {
         data: {
           status,
           remarks: remarks || null,
-          reviewedById: user.employeeId,
+          reviewedById: user.employeeId ?? null,
           reviewedAt: new Date(),
         },
         include: {
-          employee: true,
+          employee: {
+            include: {
+              user: { select: { id: true } },
+            },
+          },
         },
       });
 
@@ -1030,6 +1038,8 @@ export class PortalReadController {
       throw new ForbiddenError("Only employees can apply for leave");
     }
 
+    const employeeId = user.employeeId;
+
     const { leaveTypeId, startDate, endDate, reason } = request.body;
 
     if (!leaveTypeId || !startDate || !endDate) {
@@ -1054,20 +1064,24 @@ export class PortalReadController {
       const currentYear = new Date().getFullYear();
       const balance = await tx.leaveBalance.findFirst({
         where: {
-          employeeId: user.employeeId,
+          employeeId,
           leaveTypeId,
           year: currentYear,
         },
       });
 
-      if (balance && balance.used + days > balance.allocated) {
+      if (balance && Number(balance.used) + days > Number(balance.allocated)) {
         throw new BadRequestError("Insufficient leave balance");
       }
 
       const employee = await tx.employee.findUnique({
-        where: { id: user.employeeId },
+        where: { id: employeeId },
         include: {
-          reportingManager: true,
+          reportingManager: {
+            include: {
+              user: { select: { id: true } },
+            },
+          },
           user: { select: { id: true } },
         },
       });
@@ -1076,8 +1090,12 @@ export class PortalReadController {
         employee?.reportingManagerId === user.employeeId;
 
       // Determine initial status
-      let status: string;
-      let approvalsData: any[] = [];
+      let status: LeaveRequestStatus;
+      const approvalsData: Array<{
+        approverId: string;
+        level: number;
+        decision: string;
+      }> = [];
 
       if (
         user.roles.includes("SUPER_ADMIN") ||
@@ -1116,24 +1134,26 @@ export class PortalReadController {
 
       const request_record = await tx.leaveRequest.create({
         data: {
-          employeeId: user.employeeId,
+          employeeId,
           leaveTypeId,
           startDate: start,
           endDate: end,
           days,
           reason: reason || null,
-          status: status as any,
+          status,
           approvals: {
             create: approvalsData,
           },
         },
         include: {
           employee: {
-            select: {
-              firstName: true,
-              lastName: true,
-              employeeId: true,
-              reportingManager: true,
+            include: {
+              reportingManager: {
+                include: {
+                  user: { select: { id: true } },
+                },
+              },
+              user: { select: { id: true } },
             },
           },
           leaveType: true,
@@ -1142,9 +1162,14 @@ export class PortalReadController {
 
       // Create notifications
       if (status === "PENDING_TEAM_LEAD" && employee?.reportingManager) {
+        const reportingManagerUserId = employee.reportingManager.user?.id;
+        if (!reportingManagerUserId) {
+          throw new BadRequestError("Reporting manager account is not linked");
+        }
+
         await tx.notification.create({
           data: {
-            userId: employee.reportingManager.user?.id || "",
+            userId: reportingManagerUserId,
             channel: "IN_APP",
             title: "Leave Request Pending Approval",
             body: `${employee.firstName} ${employee.lastName} has requested ${days} day(s) of leave`,
@@ -1192,7 +1217,7 @@ export class PortalReadController {
     response: Response,
   ): Promise<Response> => {
     const user = currentUser(request);
-    const { id } = request.params;
+    const id = requireParam(request.params.id, "Leave request id");
     const { decision, remarks } = request.body;
 
     if (!["APPROVED", "REJECTED"].includes(decision)) {
@@ -1262,14 +1287,19 @@ export class PortalReadController {
 
       const updated = await tx.leaveRequest.update({
         where: { id },
-        data: { status: newStatus as any },
+        data: { status: newStatus as LeaveRequestStatus },
         include: { leaveType: true },
       });
 
       // Notify employee
+      const employeeUserId = request_record.employee.user?.id;
+      if (!employeeUserId) {
+        throw new BadRequestError("Employee account is not linked");
+      }
+
       await tx.notification.create({
         data: {
-          userId: request_record.employee.user?.id || "",
+          userId: employeeUserId,
           channel: "IN_APP",
           title: `Leave Request ${decision === "APPROVED" ? "Approved" : "Rejected"}`,
           body: `Your leave request from ${request_record.startDate.toLocaleDateString()} to ${request_record.endDate.toLocaleDateString()} has been ${decision.toLowerCase()}${remarks ? `: ${remarks}` : ""}`,
@@ -1332,6 +1362,10 @@ export class PortalReadController {
       throw new BadRequestError("Title, date, and type are required");
     }
 
+    if (!user.employeeId) {
+      throw new BadRequestError("Employee record required");
+    }
+
     const event = await prisma.leaveCalendarEvent.create({
       data: {
         title,
@@ -1350,11 +1384,66 @@ export class PortalReadController {
     );
   };
 
+  updateCalendarEvent = async (
+    request: Request,
+    response: Response,
+  ): Promise<Response> => {
+    const id = requireParam(request.params.id, "Calendar event id");
+    const { title, date, type, description } = request.body as {
+      title?: string;
+      date?: string;
+      type?: string;
+      description?: string | null;
+    };
+
+    const existing = await prisma.leaveCalendarEvent.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundError("Calendar event not found");
+    }
+
+    if (
+      title === undefined &&
+      date === undefined &&
+      type === undefined &&
+      description === undefined
+    ) {
+      throw new BadRequestError("At least one field must be provided");
+    }
+
+    if (date !== undefined) {
+      const parsedDate = new Date(date);
+      if (Number.isNaN(parsedDate.getTime())) {
+        throw new BadRequestError("Invalid event date");
+      }
+    }
+
+    const updatedEvent = await prisma.leaveCalendarEvent.update({
+      where: { id },
+      data: {
+        ...(title !== undefined ? { title } : {}),
+        ...(date !== undefined ? { date: new Date(date) } : {}),
+        ...(type !== undefined ? { type } : {}),
+        ...(description !== undefined ? { description: description || null } : {}),
+      },
+    });
+
+    return sendSuccess(
+      response,
+      "Calendar event updated",
+      updatedEvent,
+      HttpStatus.OK,
+    );
+  };
+
   deleteCalendarEvent = async (
     request: Request,
     response: Response,
   ): Promise<Response> => {
-    const { id } = request.params;
+    const id = requireParam(request.params.id, "Calendar event id");
 
     await prisma.leaveCalendarEvent.delete({ where: { id } });
 
@@ -1409,7 +1498,7 @@ export class PortalReadController {
     request: Request,
     response: Response,
   ): Promise<Response> => {
-    const { id } = request.params;
+    const id = requireParam(request.params.id, "Leave type id");
     const { name, annualQuota, isPaid, isActive } = request.body;
 
     const leaveType = await prisma.leaveType.update({
@@ -1434,7 +1523,7 @@ export class PortalReadController {
     request: Request,
     response: Response,
   ): Promise<Response> => {
-    const { id } = request.params;
+    const id = requireParam(request.params.id, "Leave type id");
 
     await prisma.leaveType.update({
       where: { id },

@@ -1,5 +1,5 @@
-import { ArrowLeft, Download, Eye, FileDown, Loader2, RefreshCw, WandSparkles } from 'lucide-react';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { ArrowLeft, Download, Eye, Loader2, RefreshCw, WandSparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { PageTransition } from '@/components/animations/PageTransition';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { endpoints } from '@/services/api/endpoints';
 import { resourceApi } from '@/services/api/resource.api';
 import { httpClient } from '@/services/api/http-client';
@@ -59,10 +59,24 @@ function buildDoc(html: string, css: string): string {
 
 async function downloadAsPdf(html: string, filename: string) {
   const html2pdf = (await import('html2pdf.js')).default;
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
   const container = document.createElement('div');
-  container.innerHTML = html;
   container.style.position = 'absolute';
   container.style.left = '-9999px';
+  container.style.top = '0';
+  container.style.width = '794px';
+  container.style.background = '#ffffff';
+  container.style.color = '#111827';
+
+  const body = parsed.body.cloneNode(true) as HTMLElement;
+  container.appendChild(body);
+
+  for (const styleNode of Array.from(parsed.head.querySelectorAll('style'))) {
+    const style = document.createElement('style');
+    style.textContent = styleNode.textContent ?? '';
+    container.appendChild(style);
+  }
+
   document.body.appendChild(container);
   await html2pdf()
     .set({

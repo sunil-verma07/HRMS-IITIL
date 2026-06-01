@@ -8,9 +8,11 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   API_PREFIX: z.string().default('/api/v1'),
   DATABASE_URL: z.string().url(),
-  ACCESS_TOKEN_SECRET: z.string().min(32),
+  JWT_SECRET: z.string().min(32).optional(),
+  JWT_EXPIRES_IN: z.string().optional(),
+  ACCESS_TOKEN_SECRET: z.string().min(32).optional(),
   REFRESH_TOKEN_SECRET: z.string().min(32),
-  ACCESS_TOKEN_EXPIRES_IN: z.string().default('15m'),
+  ACCESS_TOKEN_EXPIRES_IN: z.string().optional(),
   REFRESH_TOKEN_EXPIRES_IN: z.string().default('7d'),
   PASSWORD_RESET_TOKEN_MINUTES: z.coerce.number().int().positive().default(30),
   CORS_ORIGINS: z.string().default(''),
@@ -29,8 +31,17 @@ if (!parsedEnv.success) {
   throw new Error(`Invalid environment configuration: ${message}`);
 }
 
+const accessTokenSecret = parsedEnv.data.ACCESS_TOKEN_SECRET ?? parsedEnv.data.JWT_SECRET;
+const accessTokenExpiresIn = parsedEnv.data.ACCESS_TOKEN_EXPIRES_IN ?? parsedEnv.data.JWT_EXPIRES_IN ?? '15m';
+
+if (!accessTokenSecret) {
+  throw new Error('Invalid environment configuration: JWT_SECRET or ACCESS_TOKEN_SECRET is required');
+}
+
 export const env = {
   ...parsedEnv.data,
+  ACCESS_TOKEN_SECRET: accessTokenSecret,
+  ACCESS_TOKEN_EXPIRES_IN: accessTokenExpiresIn,
   CORS_ORIGINS: parsedEnv.data.CORS_ORIGINS.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),

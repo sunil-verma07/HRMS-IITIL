@@ -40,6 +40,7 @@ router.get('/leaves/balances', authenticate, authorize('leave.read'), asyncHandl
 router.get('/leaves/pending-approvals', authenticate, authorize('leave.approve'), asyncHandler(controller.pendingApprovals));
 router.get('/leaves/calendar', authenticate, authorize('leave.read'), asyncHandler(controller.leaveCalendar));
 router.post('/leaves/calendar', authenticate, authorize('leave.approve'), asyncHandler(controller.createCalendarEvent));
+router.patch('/leaves/calendar/:id', authenticate, authorize('leave.approve'), asyncHandler(controller.updateCalendarEvent));
 router.delete('/leaves/calendar/:id', authenticate, authorize('leave.approve'), asyncHandler(controller.deleteCalendarEvent));
 router.get('/leave-types', authenticate, authorize('leave.read'), asyncHandler(controller.leaveTypes));
 router.post('/leave-types', authenticate, authorize('rbac.manage'), asyncHandler(controller.createLeaveType));
@@ -56,9 +57,6 @@ router.get('/offer-letters/:id/download', authenticate, authorize('job.write'), 
 router.get('/templates', authenticate, authorize('job.write'), asyncHandler(controller.templates));
 router.post('/templates', authenticate, authorize('job.write'), asyncHandler(controller.createTemplate));
 router.patch('/templates/:id', authenticate, authorize('job.write'), asyncHandler(controller.updateTemplate));
-router.get('/notifications', authenticate, asyncHandler(controller.notifications));
-router.get('/activity-logs', authenticate, authorize('rbac.manage'), asyncHandler(controller.activityLogs));
-router.get('/audit-logs', authenticate, authorize('rbac.manage'), asyncHandler(controller.auditLogs));
 router.get('/settings', authenticate, authorize('rbac.manage'), asyncHandler(controller.getSettings));
 router.patch('/settings', authenticate, authorize('rbac.manage'), asyncHandler(controller.updateSettings));
 router.get('/config', authenticate, authorize('rbac.manage'), asyncHandler(controller.listAppConfigs));

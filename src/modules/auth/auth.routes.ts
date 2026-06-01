@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { asyncHandler } from '../../common/utils/async-handler';
 import { authenticate } from '../../middlewares/authenticate';
 import { validateRequest } from '../../middlewares/validate-request';
@@ -14,9 +15,16 @@ import {
 const router = Router();
 const controller = new AuthController();
 
-router.post('/login', validateRequest({ body: loginSchema }), asyncHandler(controller.login));
-router.post('/refresh', validateRequest({ body: refreshTokenSchema.partial() }), asyncHandler(controller.refresh));
-router.post('/forgot-password', validateRequest({ body: forgotPasswordSchema }), asyncHandler(controller.forgotPassword));
+const authRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post('/login', authRateLimit, validateRequest({ body: loginSchema }), asyncHandler(controller.login));
+router.post('/refresh', authRateLimit, validateRequest({ body: refreshTokenSchema.partial() }), asyncHandler(controller.refresh));
+router.post('/forgot-password', authRateLimit, validateRequest({ body: forgotPasswordSchema }), asyncHandler(controller.forgotPassword));
 router.post('/reset-password', validateRequest({ body: resetPasswordSchema }), asyncHandler(controller.resetPassword));
 router.post('/logout', authenticate, asyncHandler(controller.logout));
 router.post('/change-password', authenticate, validateRequest({ body: changePasswordSchema }), asyncHandler(controller.changePassword));

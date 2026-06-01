@@ -47,3 +47,7 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+export function useCurrentUser(): AuthUser | null {
+  return useAuthStore((state) => state.user);
+}

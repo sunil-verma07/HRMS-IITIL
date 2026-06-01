@@ -2,6 +2,8 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PermissionGate } from '@/components/guards/PermissionGate';
+import { permissions } from '@/constants/permissions';
 import { useAuthStore } from '@/store/auth.store';
 
 export type GenericRecord = Record<string, unknown>;
@@ -11,42 +13,38 @@ function value(record: GenericRecord, key: string): string {
   return raw === null || raw === undefined ? '-' : String(raw);
 }
 
-function isSuperAdmin(record: GenericRecord): boolean {
-  const user = record.user as
-    | { roles?: { role: { code: string } }[] }
-    | undefined;
-  return user?.roles?.some((r) => r.role.code === 'SUPER_ADMIN') ?? false;
-}
-
 type DeleteCellProps = {
   record: GenericRecord;
-  onDelete: (id: string) => void;
+  onDelete: (record: GenericRecord) => void;
+  canManage: boolean;
 };
 
-function DeleteCell({ record, onDelete }: DeleteCellProps) {
+function DeleteCell({ record, onDelete, canManage }: DeleteCellProps) {
   const currentUser = useAuthStore((s) => s.user);
   const recordId = value(record, 'id');
   const isOwnRecord = currentUser?.employeeId === recordId;
-  const isSystemAdmin = isSuperAdmin(record);
 
-  if (isOwnRecord || isSystemAdmin) return null;
+  if (!canManage || isOwnRecord) return null;
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
-      onClick={() => onDelete(recordId)}
-    >
-      <Trash2 className="size-4" />
-    </Button>
+    <PermissionGate permissions={[permissions.employeeDelete, permissions.employeeUserManage]}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
+        onClick={() => onDelete(record)}
+      >
+        <Trash2 className="size-4" />
+      </Button>
+    </PermissionGate>
   );
 }
 
 export function makeEmployeeColumns(
-  onDelete: (id: string) => void
+  onDelete: (record: GenericRecord) => void,
+  canManage: boolean
 ): ColumnDef<GenericRecord>[] {
-  return [
+  const columns: ColumnDef<GenericRecord>[] = [
     {
       accessorKey: 'employeeId',
       header: 'Employee ID',
@@ -73,15 +71,20 @@ export function makeEmployeeColumns(
       cell: ({ row }) => (
         <Badge variant="success">{value(row.original, 'status')}</Badge>
       )
-    },
-    {
+    }
+  ];
+
+  if (canManage) {
+    columns.push({
       id: 'actions',
       header: '',
       cell: ({ row }) => (
-        <DeleteCell record={row.original} onDelete={onDelete} />
+        <DeleteCell record={row.original} onDelete={onDelete} canManage={canManage} />
       )
-    }
-  ];
+    });
+  }
+
+  return columns;
 }
 
 export const genericColumns: ColumnDef<GenericRecord>[] = [

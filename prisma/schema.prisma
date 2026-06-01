@@ -24,6 +24,11 @@ model User {
   passwordResets      PasswordResetToken[]
   roles               UserRole[]
   employee            Employee?            @relation(fields: [employeeId], references: [id])
+  managedEmployee     Employee?            @relation("EmployeeAccountUser")
+  notifications       Notification[]
+  holidaysCreated     Holiday[]            @relation("HolidayCreator")
+  activityLogs        ActivityLog[]        @relation("ActivityLogActor")
+  auditLogs           AuditLog[]           @relation("AuditLogActor")
 
   @@index([status])
   @@index([deletedAt])
@@ -41,6 +46,7 @@ model Role {
   deletedAt      DateTime?
   hierarchyLevel Int              @default(100)
   permissions    RolePermission[]
+  scopedPermissions Permission[]      @relation("RoleScopedPermissions")
   users          UserRole[]
 
   @@index([deletedAt])
@@ -49,6 +55,10 @@ model Role {
 
 model Permission {
   id          String           @id @default(uuid()) @db.Uuid
+  roleId      String?          @db.Uuid
+  scope       String?          @db.VarChar(160)
+  level       String?          @db.VarChar(40)
+  actions     String[]         @default([])
   code        String           @unique @db.VarChar(120)
   resource    String           @db.VarChar(80)
   action      String           @db.VarChar(80)
@@ -57,8 +67,11 @@ model Permission {
   updatedAt   DateTime         @updatedAt
   deletedAt   DateTime?
   roles       RolePermission[]
+  role        Role?            @relation("RoleScopedPermissions", fields: [roleId], references: [id])
 
   @@index([resource, action])
+  @@index([roleId])
+  @@index([scope])
   @@index([deletedAt])
   @@map("permissions")
 }
@@ -123,6 +136,10 @@ model PasswordResetToken {
 model Employee {
   id                      String                     @id @default(uuid()) @db.Uuid
   employeeId              String                     @unique @db.VarChar(64)
+  userId                  String?                    @unique @db.Uuid
+  departmentId            String?                    @db.Uuid
+  designationId           String?                    @db.Uuid
+  joinDate                DateTime                   @default(now())
   firstName               String                     @db.VarChar(120)
   lastName                String                     @db.VarChar(120)
   email                   String                     @unique @db.VarChar(180)
@@ -145,17 +162,70 @@ model Employee {
   reportingManager        Employee?                  @relation("ReportingManager", fields: [reportingManagerId], references: [id])
   directReports           Employee[]                 @relation("ReportingManager")
   interviewAssignments    Interview[]                @relation("InterviewInterviewer")
+  createdJobPostings      JobPosting[]               @relation("JobPostingCreator")
   approvals               LeaveApproval[]            @relation("LeaveApprover")
+  approvalRequests        ApprovalRequest[]
+  reviewedApprovalRequests ApprovalRequest[]         @relation("ApprovalRequestApprover")
   leaveBalances           LeaveBalance[]
   createdCalendarEvents   LeaveCalendarEvent[]       @relation("CalendarEventCreator")
   leaveRequests           LeaveRequest[]             @relation("LeaveRequester")
+  onboardingProgress      OnboardingProgress[]       @relation("OnboardingProgressEmployee")
+  reviewedOnboardingProgress OnboardingProgress[]    @relation("OnboardingProgressReviewer")
+  onboardingConfigsUpdated OnboardingConfig[]        @relation("OnboardingConfigUpdater")
+  candidateNotesCreated   CandidateNote[]            @relation("CandidateNoteAuthor")
   user                    User?
+  accountUser             User?                      @relation("EmployeeAccountUser", fields: [userId], references: [id])
+  departmentRef           Department?                @relation("DepartmentMembers", fields: [departmentId], references: [id])
+  headOfDepartment        Department?                @relation("DepartmentHead")
+  designationRef          Designation?               @relation(fields: [designationId], references: [id])
 
+  @@index([userId])
+  @@index([departmentId])
+  @@index([designationId])
   @@index([department])
   @@index([status])
   @@index([reportingManagerId])
   @@index([deletedAt])
   @@map("employees")
+}
+
+model Department {
+  id                 String       @id @default(uuid()) @db.Uuid
+  code               String       @unique @db.VarChar(60)
+  name               String       @unique @db.VarChar(140)
+  description        String?
+  headEmployeeId     String?      @unique @db.Uuid
+  parentDepartmentId String?      @db.Uuid
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  deletedAt          DateTime?
+  employees          Employee[]   @relation("DepartmentMembers")
+  head               Employee?    @relation("DepartmentHead", fields: [headEmployeeId], references: [id])
+  parent             Department?  @relation("SubDepartments", fields: [parentDepartmentId], references: [id])
+  subDepartments     Department[] @relation("SubDepartments")
+  designations       Designation[]
+
+  @@index([headEmployeeId])
+  @@index([parentDepartmentId])
+  @@index([deletedAt])
+  @@map("departments")
+}
+
+model Designation {
+  id           String      @id @default(uuid()) @db.Uuid
+  code         String      @unique @db.VarChar(60)
+  title        String      @db.VarChar(140)
+  departmentId String?     @db.Uuid
+  description  String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  employees    Employee[]
+
+  @@unique([departmentId, title])
+  @@index([deletedAt])
+  @@map("designations")
 }
 
 model AppConfig {
@@ -247,6 +317,10 @@ model AttendanceRecord {
   workMinutes    Int               @default(0)
   breakMinutes   Int               @default(0)
   status         AttendanceStatus  @default(ABSENT)
+  isLate         Boolean           @default(false)
+  browser        String?           @db.VarChar(80)
+  platform       String?           @db.VarChar(80)
+  deviceType     String?           @db.VarChar(40)
   checkInMeta    Json?
   checkOutMeta   Json?
   createdAt      DateTime          @default(now())
@@ -360,11 +434,15 @@ model JobPosting {
   skills         Json
   status         JobStatus        @default(DRAFT)
   publishedAt    DateTime?
+  createdByHrId  String           @db.Uuid
+  pipelineStages Json
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
   deletedAt      DateTime?
   applications   JobApplication[]
+  createdByHr    Employee         @relation("JobPostingCreator", fields: [createdByHrId], references: [id], onDelete: Cascade)
 
+  @@index([createdByHrId])
   @@index([status])
   @@index([department])
   @@index([publishedAt])
@@ -383,15 +461,35 @@ model Candidate {
   portfolio    String?
   experience   Decimal?         @db.Decimal(5, 2)
   skills       Json?
+  tags         String[]         @default([])
+  resumeUrl    String?
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
   deletedAt    DateTime?
   documents    Document[]
   applications JobApplication[]
+  notes        CandidateNote[]
 
   @@index([email])
   @@index([deletedAt])
   @@map("candidates")
+}
+
+model CandidateNote {
+  id         String    @id @default(uuid()) @db.Uuid
+  candidateId String   @db.Uuid
+  authorId   String?   @db.Uuid
+  body       String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  candidate  Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  author     Employee? @relation("CandidateNoteAuthor", fields: [authorId], references: [id])
+
+  @@index([candidateId])
+  @@index([authorId])
+  @@index([deletedAt])
+  @@map("candidate_notes")
 }
 
 model JobApplication {
@@ -401,6 +499,8 @@ model JobApplication {
   resumeUrl   String?
   coverLetter String?
   stage       ApplicationStage @default(APPLIED)
+  score       Int              @default(0)
+  tags        String[]         @default([])
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   deletedAt   DateTime?
@@ -491,6 +591,40 @@ model OnboardingWorkflow {
   @@map("onboarding_workflows")
 }
 
+model OnboardingConfig {
+  id                String    @id @default(uuid()) @db.Uuid
+  requiredDocuments Json
+  mandatoryFields   Json
+  optionalFields    Json
+  steps             Json
+  updatedById       String?   @db.Uuid
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  updatedBy         Employee? @relation("OnboardingConfigUpdater", fields: [updatedById], references: [id])
+
+  @@index([updatedById])
+  @@map("onboarding_configs")
+}
+
+model OnboardingProgress {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  employeeId         String                   @unique @db.Uuid
+  currentStep        Int                      @default(1)
+  completedSteps     String[]                 @default([])
+  submittedDocuments Json
+  status             OnboardingProgressStatus @default(IN_PROGRESS)
+  reviewedById       String?                  @db.Uuid
+  reviewNotes        String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  employee           Employee                 @relation("OnboardingProgressEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewedBy         Employee?                @relation("OnboardingProgressReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status])
+  @@index([reviewedById])
+  @@map("onboarding_progress")
+}
+
 model Document {
   id           String          @id @default(uuid()) @db.Uuid
   provider     StorageProvider @default(CLOUDINARY)
@@ -530,15 +664,22 @@ model NotificationTemplate {
 model Notification {
   id        String              @id @default(uuid()) @db.Uuid
   userId    String              @db.Uuid
+  type      String              @default("IN_APP") @db.VarChar(80)
+  referenceId String?           @db.Uuid
   channel   NotificationChannel
   title     String              @db.VarChar(180)
+  message   String?
   body      String
+  isRead    Boolean             @default(false)
+  metadata  Json?
   data      Json?
   readAt    DateTime?
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt])
+  @@index([type])
   @@map("notifications")
 }
 
@@ -557,14 +698,19 @@ model NotificationPreference {
 
 model ActivityLog {
   id          String   @id @default(uuid()) @db.Uuid
+  actorId     String?  @db.Uuid
   actorUserId String?  @db.Uuid
+  actorName   String?  @db.VarChar(160)
   action      String   @db.VarChar(120)
   entityType  String   @db.VarChar(80)
   entityId    String?  @db.Uuid
+  entityName  String?  @db.VarChar(180)
   oldValues   Json?
   newValues   Json?
   createdAt   DateTime @default(now())
+  actor       User?    @relation("ActivityLogActor", fields: [actorId], references: [id])
 
+  @@index([actorId])
   @@index([actorUserId])
   @@index([entityType, entityId])
   @@index([createdAt])
@@ -572,18 +718,71 @@ model ActivityLog {
 }
 
 model AuditLog {
-  id          String   @id @default(uuid()) @db.Uuid
-  actorUserId String?  @db.Uuid
-  event       String   @db.VarChar(120)
-  ipAddress   String?  @db.VarChar(80)
-  userAgent   String?
-  metadata    Json?
-  createdAt   DateTime @default(now())
+  id            String   @id @default(uuid()) @db.Uuid
+  actorId       String?  @db.Uuid
+  actorUserId   String?  @db.Uuid
+  action        String?  @db.VarChar(120)
+  event         String   @db.VarChar(120)
+  entityType    String?  @db.VarChar(80)
+  entityId      String?  @db.Uuid
+  previousValue Json?
+  newValue      Json?
+  ipAddress     String?  @db.VarChar(80)
+  userAgent     String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  actor         User?    @relation("AuditLogActor", fields: [actorId], references: [id])
 
+  @@index([actorId])
   @@index([actorUserId])
+  @@index([entityType, entityId])
   @@index([event])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model ApprovalRequest {
+  id             String    @id @default(uuid()) @db.Uuid
+  employeeId     String    @db.Uuid
+  approverId     String?   @db.Uuid
+  type           String    @db.VarChar(80)
+  status         String    @db.VarChar(40)
+  attendanceDate DateTime?
+  checkInTime    DateTime?
+  checkOutTime   DateTime?
+  reason         String?
+  remarks        String?
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  approver       Employee? @relation("ApprovalRequestApprover", fields: [approverId], references: [id])
+
+  @@index([employeeId])
+  @@index([approverId])
+  @@index([type])
+  @@index([status])
+  @@map("approval_requests")
+}
+
+model Holiday {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(180)
+  date        DateTime
+  type        String   @db.VarChar(40)
+  region      String?  @db.VarChar(120)
+  description String?
+  isActive    Boolean  @default(true)
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User?    @relation("HolidayCreator", fields: [createdById], references: [id])
+
+  @@unique([date, region])
+  @@index([date])
+  @@index([isActive])
+  @@index([createdById])
+  @@map("holidays")
 }
 
 enum UserStatus {
@@ -596,6 +795,7 @@ enum UserStatus {
 enum EmployeeStatus {
   ACTIVE
   INACTIVE
+  ON_LEAVE
   ON_NOTICE
   TERMINATED
 }
@@ -621,6 +821,7 @@ enum LeaveRequestStatus {
   APPROVED
   REJECTED
   CANCELLED
+  PENDING
 }
 
 enum JobStatus {
@@ -628,6 +829,14 @@ enum JobStatus {
   PUBLISHED
   UNPUBLISHED
   CLOSED
+  ARCHIVED
+}
+
+enum OnboardingProgressStatus {
+  IN_PROGRESS
+  SUBMITTED
+  APPROVED
+  REJECTED
 }
 
 enum ApplicationStage {

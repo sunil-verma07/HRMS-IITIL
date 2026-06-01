@@ -1,5 +1,5 @@
 import { RbacRepository } from './rbac.repository';
-import type { AssignRoleDto, AttachPermissionDto, CreateRoleDto, SetRolePermissionDto, UpdateRoleDto } from './rbac.validation';
+import type { AssignRoleDto, AttachPermissionDto, CreateRoleDto, SetRolePermissionDto, UpdatePermissionMatrixDto, UpdateRoleDto } from './rbac.validation';
 
 export class RbacService {
   constructor(private readonly repository = new RbacRepository()) {}
@@ -34,6 +34,15 @@ export class RbacService {
 
   setRolePermission(roleId: string, permissionId: string, input: SetRolePermissionDto, actorUserId?: string): Promise<void> {
     return this.repository.setRolePermission(roleId, permissionId, input, actorUserId);
+  }
+
+  getPermissionMatrix() {
+    return this.repository.getPermissionMatrix();
+  }
+
+  async updatePermissionMatrix(input: UpdatePermissionMatrixDto, actorUserId?: string) {
+    await this.repository.savePermissionMatrix(input.changes, actorUserId);
+    return this.repository.getPermissionMatrix();
   }
 
   async getAccessProfile(userId: string): Promise<{ roles: string[]; permissions: string[]; hierarchyLevel: number }> {

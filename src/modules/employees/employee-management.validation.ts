@@ -15,12 +15,16 @@ export const createEmployeeSchema = z.object({
   department: z.string().trim().min(1).max(140),
   joiningDate: z.coerce.date(),
   employmentType: z.nativeEnum(EmploymentType),
-  reportingManagerId: z.string().uuid().optional(),
+  reportingManagerId: z.string().uuid().optional().nullable(),
   status: z.nativeEnum(EmployeeStatus).default(EmployeeStatus.ACTIVE)
 });
 
 export const updateEmployeeSchema = createEmployeeSchema.partial().refine((value) => Object.keys(value).length > 0, {
   message: 'At least one field is required'
+});
+
+export const updateReportingManagerSchema = z.object({
+  reportingManagerId: z.string().uuid().nullable().optional()
 });
 
 export type CreateEmployeeDto = z.infer<typeof createEmployeeSchema>;

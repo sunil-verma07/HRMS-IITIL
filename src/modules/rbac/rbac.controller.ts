@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { ForbiddenError } from '../../common/errors/app-error';
 import { sendSuccess } from '../../common/http/api-response';
 import { HttpStatus } from '../../common/http/status-codes';
 import { RbacService } from './rbac.service';
@@ -16,6 +17,12 @@ export class RbacController {
     const permissions = await this.rbacService.listPermissions();
 
     return sendSuccess(response, 'Permissions retrieved', permissions, HttpStatus.OK);
+  };
+
+  getPermissionMatrix = async (_request: Request, response: Response): Promise<Response> => {
+    const matrix = await this.rbacService.getPermissionMatrix();
+
+    return sendSuccess(response, 'Permission matrix retrieved', matrix, HttpStatus.OK);
   };
 
   createRole = async (request: Request, response: Response): Promise<Response> => {
@@ -52,5 +59,16 @@ export class RbacController {
     await this.rbacService.setRolePermission(request.params.roleId as string, request.params.permissionId as string, request.body, request.user?.id);
 
     return sendSuccess(response, 'Role permission updated', null, HttpStatus.OK);
+  };
+
+  updatePermissionMatrix = async (request: Request, response: Response): Promise<Response> => {
+    const roles = request.user?.roles ?? [];
+    if (!roles.includes('SUPER_ADMIN')) {
+      throw new ForbiddenError('Only SUPER_ADMIN can update permission matrix');
+    }
+
+    const matrix = await this.rbacService.updatePermissionMatrix(request.body, request.user?.id);
+
+    return sendSuccess(response, 'Permission matrix updated', matrix, HttpStatus.OK);
   };
 }

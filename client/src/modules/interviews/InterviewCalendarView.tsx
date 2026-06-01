@@ -4,7 +4,6 @@ import {
   format,
   startOfWeek,
   addDays,
-  isSameDay,
   isToday,
   addWeeks,
   subWeeks,
@@ -45,7 +44,7 @@ function groupByDay(interviews: InterviewRecord[]): GroupedInterviews {
 }
 
 function getTopOffset(date: Date): number {
-  const h = getHours(date) - HOURS[0];
+  const h = getHours(date) - (HOURS[0] ?? 0);
   const m = getMinutes(date);
   return (h + m / 60) * CELL_HEIGHT;
 }
@@ -181,7 +180,7 @@ function WeekView({ days, grouped }: WeekViewProps) {
 
   useEffect(() => {
     if (scrollRef.current) {
-      const offset = Math.max(0, (9 - HOURS[0]) * CELL_HEIGHT - 60);
+      const offset = Math.max(0, (9 - (HOURS[0] ?? 0)) * CELL_HEIGHT - 60);
       scrollRef.current.scrollTop = offset;
     }
   }, []);
@@ -265,7 +264,7 @@ function DayView({
 
   useEffect(() => {
     if (scrollRef.current) {
-      const offset = Math.max(0, (9 - HOURS[0]) * CELL_HEIGHT - 60);
+      const offset = Math.max(0, (9 - (HOURS[0] ?? 0)) * CELL_HEIGHT - 60);
       scrollRef.current.scrollTop = offset;
     }
   }, []);
@@ -373,7 +372,7 @@ export function InterviewCalendarView({ interviews, isLoading }: Props) {
           </Button>
           <span className="text-sm font-medium text-white/75 min-w-[180px] text-center">
             {calendarView === "week"
-              ? `${format(days[0], "MMM d")} – ${format(days[6], "MMM d, yyyy")}`
+              ? `${format(days[0] ?? new Date(0), "MMM d")} – ${format(days[6] ?? new Date(0), "MMM d, yyyy")}`
               : format(calendarDate, "MMMM d, yyyy")}
           </span>
           <Button

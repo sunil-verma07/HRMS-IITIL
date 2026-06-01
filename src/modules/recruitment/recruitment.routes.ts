@@ -16,10 +16,22 @@ router.get(
   asyncHandler(ctrl.getJobs),
 );
 router.get(
+  "/jobs/published",
+  authenticate,
+  authorize("job.read"),
+  asyncHandler(ctrl.getPublishedJobs),
+);
+router.get(
   "/jobs/:id",
   authenticate,
   authorize("job.read"),
   asyncHandler(ctrl.getJobById),
+);
+router.get(
+  "/jobs/:jobId/candidates",
+  authenticate,
+  authorize("candidate.read"),
+  asyncHandler(ctrl.getJobCandidates),
 );
 router.post(
   "/jobs",
@@ -53,6 +65,18 @@ router.get(
   authorize("candidate.read"),
   asyncHandler(ctrl.getCandidateById),
 );
+router.get(
+  "/candidates/:id/detail",
+  authenticate,
+  authorize("candidate.read"),
+  asyncHandler(ctrl.getCandidateDetail),
+);
+router.get(
+  "/candidates/:id/activity",
+  authenticate,
+  authorize("candidate.read"),
+  asyncHandler(ctrl.getCandidateActivity),
+);
 router.post(
   "/candidates",
   authenticate,
@@ -64,6 +88,18 @@ router.patch(
   authenticate,
   authorize("candidate.write"),
   asyncHandler(ctrl.updateCandidate),
+);
+router.patch(
+  "/candidates/:id/stage",
+  authenticate,
+  authorize("application.write"),
+  asyncHandler(ctrl.updateCandidateStage),
+);
+router.post(
+  "/candidates/:id/notes",
+  authenticate,
+  authorize("candidate.write"),
+  asyncHandler(ctrl.addCandidateNote),
 );
 router.delete(
   "/candidates/:id",

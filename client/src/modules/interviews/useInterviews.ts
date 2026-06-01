@@ -33,19 +33,19 @@ export type CreateInterviewPayload = {
   scheduledAt: string;
   durationMins: number;
   mode: string;
-  meetingLink?: string;
-  notes?: string;
+  meetingLink?: string | undefined;
+  notes?: string | undefined;
 };
 
-export type UpdateInterviewPayload = Partial<{
-  scheduledAt: string;
-  durationMins: number;
-  mode: string;
-  meetingLink: string;
-  status: string;
-  notes: string;
-  feedback: string;
-}>;
+export type UpdateInterviewPayload = {
+  scheduledAt?: string | undefined;
+  durationMins?: number | undefined;
+  mode?: string | undefined;
+  meetingLink?: string | undefined;
+  status?: string | undefined;
+  notes?: string | undefined;
+  feedback?: string | undefined;
+};
 
 export type CandidateOption = {
   id: string;
@@ -87,11 +87,11 @@ export type QuickCreatePayload = {
   firstName: string;
   lastName: string;
   email: string;
-  phone?: string;
+  phone?: string | undefined;
   jobId: string;
   source: ApplicationSource;
-  resumeUrl?: string;
-  notes?: string;
+  resumeUrl?: string | undefined;
+  notes?: string | undefined;
 };
 
 export type QuickCreateResult = {
@@ -254,7 +254,7 @@ export function useJobs() {
   return useQuery<JobOption[]>({
     queryKey: jobKeys.options(),
     queryFn: async () => {
-      const { data } = await httpClient.get(endpoints.recruitment.jobs, {
+      const { data } = await httpClient.get(endpoints.recruitment.publishedJobs, {
         params: { limit: 200, status: "PUBLISHED" },
       });
       return data.data.items;

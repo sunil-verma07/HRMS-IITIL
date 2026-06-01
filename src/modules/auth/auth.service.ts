@@ -12,6 +12,7 @@ import {
   signRefreshToken,
   verifyRefreshToken
 } from '../../common/utils/tokens';
+import { ACTION_LEVEL, expandScopedPermissions, SCOPE_LEVEL, type PermissionAction, type PermissionScope } from '../../common/utils/scope-filter';
 import { env } from '../../config/env';
 import { prisma } from '../../database/prisma';
 import { AuthRepository, type UserWithAccess } from './auth.repository';
@@ -97,7 +98,7 @@ export class AuthService {
     });
 
     return {
-      ...this.buildAccessResult(session.user, nextSessionId),
+      ...(await this.buildAccessResult(session.user, nextSessionId)),
       refreshToken: nextRefreshToken
     };
   }
@@ -217,22 +218,14 @@ export class AuthService {
     );
 
     return {
-      ...this.buildAccessResult(user, sessionId),
+      ...(await this.buildAccessResult(user, sessionId)),
       refreshToken
     };
   }
 
-  private buildAccessResult(user: UserWithAccess, sessionId: string): Omit<AuthResult, keyof Pick<AuthTokens, 'refreshToken'>> {
-    const roles = user.roles.filter((item) => !item.role.deletedAt).map((item) => item.role.code);
-    const permissions = [
-      ...new Set(
-        user.roles.flatMap((item) =>
-          item.role.permissions
-            .filter((rolePermission) => !rolePermission.permission.deletedAt)
-            .map((rolePermission) => rolePermission.permission.code)
-        )
-      )
-    ];
+  private async buildAccessResult(user: UserWithAccess, sessionId: string): Promise<Omit<AuthResult, keyof Pick<AuthTokens, 'refreshToken'>>> {
+    const accessProfile = await this.loadAccessProfileFromDb(user.id);
+    const permissions = this.buildExpandedPermissions(accessProfile.permissions);
 
     return {
       accessToken: signAccessToken({
@@ -244,11 +237,77 @@ export class AuthService {
       user: {
         id: user.id,
         userId: user.userId,
-        roles,
+        roles: accessProfile.roles,
         permissions,
         forcePasswordReset: user.forcePasswordReset
       }
     };
+  }
+
+  private async loadAccessProfileFromDb(userId: string): Promise<{ roles: string[]; permissions: string[] }> {
+    const userRoles = await prisma.userRole.findMany({
+      where: {
+        userId,
+        role: { deletedAt: null }
+      },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              where: { permission: { deletedAt: null } },
+              include: {
+                permission: { select: { code: true } }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const roles = userRoles.map((entry) => entry.role.code);
+    const permissions = [
+      ...new Set(
+        userRoles.flatMap((entry) => entry.role.permissions.map((rolePermission) => rolePermission.permission.code))
+      )
+    ];
+
+    return { roles, permissions };
+  }
+
+  private buildExpandedPermissions(rawCodes: string[]): string[] {
+    const expanded = new Set<string>(rawCodes);
+    const scopedExpanded = expandScopedPermissions(rawCodes);
+
+    for (const permission of scopedExpanded) {
+      expanded.add(permission);
+    }
+
+    for (const permission of rawCodes) {
+      if (!permission.includes(':')) {
+        continue;
+      }
+
+      const parts = permission.split(':');
+      if (parts.length !== 3) {
+        continue;
+      }
+
+      const [resource, action, scope] = parts;
+      const actionLevel = ACTION_LEVEL[action as PermissionAction] ?? 1;
+      const scopeLevel = SCOPE_LEVEL[scope as PermissionScope] ?? 0;
+
+      for (const [actionName, currentActionLevel] of Object.entries(ACTION_LEVEL)) {
+        if (currentActionLevel <= actionLevel) {
+          for (const [scopeName, currentScopeLevel] of Object.entries(SCOPE_LEVEL)) {
+            if (currentScopeLevel > 0 && currentScopeLevel <= scopeLevel) {
+              expanded.add(`${resource}:${actionName}:${scopeName}`);
+            }
+          }
+        }
+      }
+    }
+
+    return [...expanded];
   }
 
   private buildSessionCreateInput(input: {

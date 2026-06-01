@@ -1,5 +1,5 @@
 import { Check, Edit3, ImagePlus, Loader2, Plus, Save, Star, StarOff, Tag, Trash2, X } from 'lucide-react';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, forwardRef, type ComponentPropsWithoutRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTransition } from '@/components/animations/PageTransition';
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { DataTable } from '@/components/tables/DataTable';
@@ -39,8 +40,14 @@ const EMPTY: Partial<Template> = {
 
 function extractVariables(html: string): string[] {
   const matches = [...html.matchAll(/\{\{\s*(\w+)\s*\}\}/g)];
-  return [...new Set(matches.map((m) => m[1]))];
+  return [...new Set(matches.map((m) => m[1]).filter((v): v is string => v !== undefined))];
 }
+
+const ForwardTextarea = forwardRef<HTMLTextAreaElement, ComponentPropsWithoutRef<typeof Textarea>>(
+  function ForwardTextarea(props, ref) {
+    return <Textarea ref={ref} {...props} />;
+  }
+);
 
 function buildPreview(html: string, css: string, sampleValues: Record<string, string>): string {
   let rendered = html;
@@ -53,6 +60,7 @@ function buildPreview(html: string, css: string, sampleValues: Record<string, st
 export function TemplatesPage() {
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
   const [editing, setEditing] = useState<Template | null>(null);
   const [form, setForm] = useState<Partial<Template>>(EMPTY);
   const [sampleValues, setSampleValues] = useState<Record<string, string>>({});
@@ -97,7 +105,7 @@ export function TemplatesPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => httpClient.delete(`${endpoints.templates}/${id}`),
-    onSuccess: () => { toast.success('Template deleted'); void queryClient.invalidateQueries({ queryKey: ['templates'] }); },
+    onSuccess: () => { toast.success('Template deleted'); setDeleteTarget(null); void queryClient.invalidateQueries({ queryKey: ['templates'] }); },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -235,11 +243,7 @@ export function TemplatesPage() {
                 size="sm"
                 variant="ghost"
                 className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
-                onClick={() => {
-                  if (window.confirm(`Delete template "${t.name}"? This cannot be undone.`)) {
-                    deleteMutation.mutate(t.id);
-                  }
-                }}
+                onClick={() => setDeleteTarget(t)}
                 title="Delete template"
               >
                 <Trash2 className="size-3.5" />
@@ -353,7 +357,7 @@ export function TemplatesPage() {
                 </div>
 
                 {activeTab === 'html' && (
-                  <Textarea
+                  <ForwardTextarea
                     ref={textareaRef}
                     value={form.htmlContent ?? ''}
                     onChange={(e) => setForm((f) => ({ ...f, htmlContent: e.target.value }))}
@@ -442,6 +446,18 @@ export function TemplatesPage() {
             </div>
           </DialogContent>
         </Dialog>
+        <ConfirmModal
+          open={deleteTarget !== null}
+          title="Delete Template"
+          description={`Are you sure you want to delete "${deleteTarget?.name ?? ''}"? This action cannot be undone.`}
+          confirmLabel="Delete"
+          variant="danger"
+          isLoading={deleteMutation.isPending}
+          onConfirm={() => {
+            if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+          }}
+          onCancel={() => setDeleteTarget(null)}
+        />
       </div>
     </PageTransition>
   );

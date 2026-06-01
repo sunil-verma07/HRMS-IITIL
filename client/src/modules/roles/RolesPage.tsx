@@ -13,7 +13,6 @@ import { SectionCard } from '@/components/shared/SectionCard';
 import { endpoints } from '@/services/api/endpoints';
 import { resourceApi } from '@/services/api/resource.api';
 import { OperationalModulePage } from '@/modules/shared/OperationalModulePage';
-import type { GenericRecord } from '@/modules/shared/module-columns';
 
 type Role = {
   id: string;

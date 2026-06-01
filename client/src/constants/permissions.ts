@@ -1,6 +1,9 @@
 export const permissions = {
   dashboardRead: 'dashboard.read',
   employeeRead: 'employee.read',
+  employeeCreate: 'employee.write',
+  employeeUpdate: 'employee.write',
+  employeeDelete: 'employee.delete',
   employeeWrite: 'employee.write',
   attendanceRead: 'attendance.read',
   attendanceWrite: 'attendance.write',

@@ -7,6 +7,7 @@ import { cn, formatCompactNumber } from '@/lib/utils';
 type StatCardProps = {
   label: string;
   value: number;
+  formattedValue?: string;
   suffix?: string;
   trend?: string;
   icon: LucideIcon;
@@ -21,7 +22,7 @@ const tones = {
   amber: 'from-amber-300/20 text-amber-200 ring-amber-300/25'
 };
 
-export function StatCard({ label, value, suffix = '', trend, icon: Icon, tone = 'cyan' }: StatCardProps) {
+export function StatCard({ label, value, formattedValue, suffix = '', trend, icon: Icon, tone = 'cyan' }: StatCardProps) {
   const spring = useSpring(0, { stiffness: 90, damping: 18 });
   const display = useTransform(spring, (latest) => `${formatCompactNumber(Math.round(latest))}${suffix}`);
 
@@ -34,7 +35,7 @@ export function StatCard({ label, value, suffix = '', trend, icon: Icon, tone = 
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm text-muted-foreground">{label}</p>
-          <motion.p className="mt-5 text-3xl font-semibold tracking-tight">{display}</motion.p>
+          <motion.p className="mt-5 text-3xl font-semibold tracking-tight">{formattedValue ?? display}</motion.p>
         </div>
         <div className={cn('grid size-12 place-items-center rounded-xl bg-gradient-to-br to-transparent ring-1', tones[tone])}>
           <Icon className="size-5" />

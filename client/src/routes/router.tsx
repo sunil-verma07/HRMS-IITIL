@@ -34,10 +34,10 @@ const DashboardPage = lazy(() =>
     default: module.DashboardPage,
   })),
 );
-const EmployeeDirectoryPage = lazy(() =>
-  import("@/modules/employee-directory/EmployeeDirectoryPage").then(
-    (module) => ({ default: module.EmployeeDirectoryPage }),
-  ),
+const EmployeesPage = lazy(() =>
+  import("@/modules/employees/EmployeesPage").then((module) => ({
+    default: module.EmployeesPage,
+  })),
 );
 const UserManagementPage = lazy(() =>
   import("@/modules/user-management/UserManagementPage").then((module) => ({
@@ -114,11 +114,6 @@ const ProfilePage = lazy(() =>
     default: module.ProfilePage,
   })),
 );
-const LeaveApprovalsPage = lazy(() =>
-  import("@/modules/leaves/LeaveApprovalsPage").then((module) => ({
-    default: module.LeaveApprovalsPage,
-  })),
-);
 
 function lazyElement(element: ReactNode) {
   return (
@@ -148,38 +143,40 @@ export const router = createBrowserRouter([
           {
             element: (
               <ProtectedRoute
-                permissions={[permissions.employeeDirectoryRead]}
+                permissions={[
+                  permissions.employeeDirectoryRead,
+                  permissions.employeeRead,
+                  permissions.employeeWrite,
+                  permissions.employeeUserManage,
+                ]}
               />
             ),
             children: [
               {
-                path: "/employee-directory",
-                element: lazyElement(<EmployeeDirectoryPage />),
+                path: "/employees",
+                element: lazyElement(<UserManagementPage />),
               },
-            ],
-          },
-          {
-            element: (
-              <ProtectedRoute permissions={[permissions.employeeUserManage]} />
-            ),
-            children: [
+              {
+                path: "/employee-directory",
+                element: lazyElement(<EmployeesPage />),
+              },
               {
                 path: "/user-management",
                 element: lazyElement(<UserManagementPage />),
               },
-              {
-                path: "/employees",
-                element: lazyElement(<UserManagementPage />),
-              },
             ],
           },
           {
-            element: (
-              <ProtectedRoute permissions={[permissions.attendanceRead]} />
-            ),
-            children: [
-              { path: "/attendance", element: lazyElement(<AttendancePage />) },
-            ],
+            path: "/people",
+            element: <Navigate to="/employees" replace />,
+          },
+          {
+            path: "/people/*",
+            element: <Navigate to="/employees" replace />,
+          },
+          {
+            path: "/attendance",
+            element: lazyElement(<AttendancePage />),
           },
           {
             element: <ProtectedRoute permissions={[permissions.leaveRead]} />,
@@ -240,17 +237,6 @@ export const router = createBrowserRouter([
                 element: lazyElement(<ActivityLogsPage />),
               },
               { path: "/audit-logs", element: lazyElement(<AuditLogsPage />) },
-            ],
-          },
-          {
-            element: (
-              <ProtectedRoute permissions={[permissions.leaveApprove]} />
-            ),
-            children: [
-              {
-                path: "/leave-approvals",
-                element: lazyElement(<LeaveApprovalsPage />),
-              },
             ],
           },
           {

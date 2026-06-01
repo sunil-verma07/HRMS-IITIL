@@ -103,8 +103,6 @@ const InterviewRow = memo(function InterviewRow({
     ? `${interview.interviewer.firstName} ${interview.interviewer.lastName}`
     : "—";
 
-  const canTransition = (VALID_TRANSITIONS[interview.status] ?? []).length > 0;
-
   const handleStatusUpdate = useCallback(
     (status: string) => {
       updateMutation.mutate({ id: interview.id, payload: { status } });

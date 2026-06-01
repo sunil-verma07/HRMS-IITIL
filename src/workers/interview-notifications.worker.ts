@@ -1,4 +1,5 @@
 import { prisma } from "../database/prisma";
+import { logger } from "../config/logger";
 
 const REMIND_MINUTES = 15;
 const WINDOW_SECONDS = 60; // one-minute window, matches cron frequency
@@ -42,6 +43,9 @@ async function runReminders(): Promise<void> {
     type: string;
     referenceId: string;
     message: string;
+    body: string;
+    title: string;
+    channel: 'IN_APP';
     isRead: boolean;
   };
 
@@ -59,7 +63,10 @@ async function runReminders(): Promise<void> {
         userId: interview.interviewer.id,
         type: "INTERVIEW_REMINDER",
         referenceId: interview.id,
+        title: "Interview reminder",
         message,
+        body: message,
+        channel: 'IN_APP',
         isRead: false,
       });
     }
@@ -75,8 +82,9 @@ async function runReminders(): Promise<void> {
     }),
   ]);
 
-  console.log(
-    `[interview-worker] Sent ${notifications.length} reminder(s) for ${interviews.length} interview(s)`,
+  logger.info(
+    { remindersSent: notifications.length, interviewsMatched: interviews.length },
+    'Sent interview reminders',
   );
 }
 
@@ -86,23 +94,23 @@ export function startInterviewNotificationWorker(): void {
   if (workerTimer) return; // prevent double-start
 
   // Run immediately on start, then every 60 seconds
-  runReminders().catch((err) =>
-    console.error("[interview-worker] Initial run failed:", err),
+  runReminders().catch((error) =>
+    logger.error({ error }, 'Initial interview reminder run failed'),
   );
 
   workerTimer = setInterval(() => {
-    runReminders().catch((err) =>
-      console.error("[interview-worker] Run failed:", err),
+    runReminders().catch((error) =>
+      logger.error({ error }, 'Interview reminder run failed'),
     );
   }, 60_000);
 
-  console.log("[interview-worker] Started — checking every 60s");
+  logger.info('Interview reminder worker started');
 }
 
 export function stopInterviewNotificationWorker(): void {
   if (workerTimer) {
     clearInterval(workerTimer);
     workerTimer = null;
-    console.log("[interview-worker] Stopped");
+    logger.info('Interview reminder worker stopped');
   }
 }

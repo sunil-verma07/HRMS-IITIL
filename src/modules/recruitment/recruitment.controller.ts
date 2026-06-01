@@ -2,7 +2,7 @@
 import type { Request, Response } from "express";
 import { prisma } from "../../database/prisma";
 import { ApplicationStage } from "@prisma/client";
-import { sendSuccess, sendError } from "../../common/http/api-response";
+import { sendSuccess } from "../../common/http/api-response";
 import { HttpStatus } from "../../common/http/status-codes";
 import {
   parsePagination,
@@ -22,6 +22,57 @@ import {
   endOfToday,
   addDays,
 } from "date-fns";
+
+const DEFAULT_PIPELINE_STAGES = [
+  "APPLIED",
+  "SCREENING",
+  "INTERVIEW",
+  "TECHNICAL",
+  "OFFER",
+  "HIRED",
+  "REJECTED",
+] as const;
+
+const HR_ROLE_CODES = new Set([
+  "HR",
+  "HR_MANAGER",
+  "HR_EXECUTIVE",
+  "ADMIN",
+  "PORTAL_ADMIN",
+  "SUPER_ADMIN",
+]);
+
+function parseJsonStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [...DEFAULT_PIPELINE_STAGES];
+  }
+
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function canViewJobs(user: ReturnType<typeof currentUser>): "self" | "department" | "all" {
+  if (user.permissions.includes("recruitment.view.all")) {
+    return "all";
+  }
+
+  if (user.permissions.includes("recruitment.view.department")) {
+    return "department";
+  }
+
+  return "self";
+}
+
+function isHrScopedUser(user: ReturnType<typeof currentUser>): boolean {
+  return user.roles.some((role) => HR_ROLE_CODES.has(role)) || user.permissions.some((permission) => permission.startsWith("recruitment."));
+}
+
+function getJobPipelineStages(job: { pipelineStages: unknown }): string[] {
+  return parseJsonStringArray(job.pipelineStages);
+}
+
+function normalizeStage(stage: unknown): string {
+  return typeof stage === "string" ? stage.trim().toUpperCase() : "";
+}
 
 // ---------------------------------------------------------------------------
 // Allowed external application sources — extend as needed
@@ -66,6 +117,14 @@ function normalizeEmail(raw: unknown, fieldName = "email"): string {
   return trimmed;
 }
 
+function requireParam(value: string | undefined, label: string): string {
+  if (!value) {
+    throw new BadRequestError(`${label} is required`);
+  }
+
+  return value;
+}
+
 // ---------------------------------------------------------------------------
 
 export class RecruitmentController {
@@ -76,8 +135,14 @@ export class RecruitmentController {
   getJobs = async (req: Request, res: Response): Promise<Response> => {
     const query = parsePagination(req);
     const { search } = query;
+    const user = currentUser(req);
+    const requestedScope = typeof req.query.scope === "string" ? req.query.scope : "";
+    const scope = requestedScope === "all" || requestedScope === "department" || requestedScope === "self"
+      ? requestedScope
+      : canViewJobs(user);
+    const statusFilter = typeof req.query.status === "string" ? req.query.status.trim().toUpperCase() : "";
 
-    const where = {
+    const where: Record<string, unknown> = {
       deletedAt: null,
       ...(search
         ? {
@@ -90,11 +155,28 @@ export class RecruitmentController {
         : {}),
     };
 
+    if (statusFilter && ["DRAFT", "PUBLISHED", "CLOSED", "ARCHIVED"].includes(statusFilter)) {
+      where.status = statusFilter;
+    }
+
+    if (statusFilter !== "PUBLISHED") {
+      if (scope === "self" && user.employeeId) {
+        where.createdByHrId = user.employeeId;
+      } else if (scope === "department" && user.department) {
+        where.department = user.department;
+      }
+    }
+
     const [items, total] = await Promise.all([
       prisma.jobPosting.findMany({
         where,
         ...pageArgs(query),
         orderBy: { createdAt: "desc" },
+        include: {
+          createdByHr: {
+            select: { id: true, employeeId: true, firstName: true, lastName: true, department: true },
+          },
+        },
       }),
       prisma.jobPosting.count({ where }),
     ]);
@@ -108,15 +190,45 @@ export class RecruitmentController {
   };
 
   getJobById = async (req: Request, res: Response): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Job id");
+    const user = currentUser(req);
+    const viewScope = canViewJobs(user);
+    const accessConditions: Record<string, unknown>[] = [{ status: "PUBLISHED" }];
+
+    if (viewScope === "all") {
+      accessConditions.length = 0;
+    } else {
+      if (user.employeeId) {
+        accessConditions.push({ createdByHrId: user.employeeId });
+      }
+
+      if (viewScope === "department" && user.department) {
+        accessConditions.push({ department: user.department });
+      }
+    }
+
     const job = await prisma.jobPosting.findFirst({
-      where: { id, deletedAt: null },
+      where: {
+        id,
+        deletedAt: null,
+        ...(accessConditions.length > 0 ? { OR: accessConditions } : {}),
+      },
+      include: {
+        createdByHr: {
+          select: { id: true, employeeId: true, firstName: true, lastName: true, department: true },
+        },
+      },
     });
     if (!job) throw new NotFoundError("Job not found");
     return sendSuccess(res, "Job retrieved", job, HttpStatus.OK);
   };
 
   createJob = async (req: Request, res: Response): Promise<Response> => {
+    const user = currentUser(req);
+    if (!user.employeeId) {
+      throw new BadRequestError("Only linked HR employees can create jobs");
+    }
+
     const {
       title,
       slug,
@@ -159,7 +271,14 @@ export class RecruitmentController {
         salaryRange,
         skills: skills ?? [],
         status: status ?? "DRAFT",
+        createdByHrId: user.employeeId,
+        pipelineStages: parseJsonStringArray(req.body.pipelineStages ?? DEFAULT_PIPELINE_STAGES),
         publishedAt: publishedAt ? parseDate(publishedAt, "publishedAt") : null,
+      },
+      include: {
+        createdByHr: {
+          select: { id: true, employeeId: true, firstName: true, lastName: true, department: true },
+        },
       },
     });
 
@@ -167,7 +286,7 @@ export class RecruitmentController {
   };
 
   updateJob = async (req: Request, res: Response): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Job id");
     const existing = await prisma.jobPosting.findFirst({
       where: { id, deletedAt: null },
     });
@@ -193,7 +312,7 @@ export class RecruitmentController {
   };
 
   deleteJob = async (req: Request, res: Response): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Job id");
     const existing = await prisma.jobPosting.findFirst({
       where: { id, deletedAt: null },
     });
@@ -205,6 +324,269 @@ export class RecruitmentController {
     });
 
     return sendSuccess(res, "Job deleted", null, HttpStatus.OK);
+  };
+
+  getPublishedJobs = async (req: Request, res: Response): Promise<Response> => {
+    const query = parsePagination(req);
+    const { search } = query;
+
+    const where: Record<string, unknown> = {
+      deletedAt: null,
+      status: "PUBLISHED",
+      ...(search
+        ? {
+            OR: [
+              { title: { contains: search, mode: "insensitive" as const } },
+              { department: { contains: search, mode: "insensitive" as const } },
+              { location: { contains: search, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      prisma.jobPosting.findMany({
+        where,
+        ...pageArgs(query),
+        orderBy: { publishedAt: "desc" },
+        include: {
+          createdByHr: {
+            select: { id: true, employeeId: true, firstName: true, lastName: true, department: true },
+          },
+        },
+      }),
+      prisma.jobPosting.count({ where }),
+    ]);
+
+    return sendSuccess(res, "Published jobs retrieved", paginated(items, total, query), HttpStatus.OK);
+  };
+
+  getJobCandidates = async (req: Request, res: Response): Promise<Response> => {
+    const jobId = requireParam(req.params.jobId, "Job id");
+    const job = await prisma.jobPosting.findFirst({
+      where: { id: jobId, deletedAt: null },
+    });
+
+    if (!job) {
+      throw new NotFoundError("Job not found");
+    }
+
+    const applications = await prisma.jobApplication.findMany({
+      where: { jobId, deletedAt: null },
+      orderBy: { updatedAt: "desc" },
+      include: {
+        candidate: true,
+        interviews: {
+          orderBy: { scheduledAt: "desc" },
+          take: 1,
+        },
+      },
+    });
+
+    return sendSuccess(
+      res,
+      "Job candidates retrieved",
+      {
+        job,
+        items: applications.map((application) => ({
+          id: application.candidateId,
+          applicationId: application.id,
+          candidate: application.candidate,
+          stage: application.stage,
+          score: application.score,
+          tags: application.tags,
+          currentInterviewStatus: application.interviews[0]?.status ?? null,
+          appliedAt: application.createdAt,
+          notes: application.notes,
+        })),
+      },
+      HttpStatus.OK,
+    );
+  };
+
+  getCandidateDetail = async (req: Request, res: Response): Promise<Response> => {
+    const id = requireParam(req.params.id, "Candidate id");
+    const candidate = await prisma.candidate.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        applications: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: "desc" },
+          include: {
+            job: true,
+            interviews: {
+              orderBy: { scheduledAt: "desc" },
+              include: {
+                interviewer: {
+                  select: { id: true, employeeId: true, firstName: true, lastName: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!candidate) throw new NotFoundError("Candidate not found");
+
+    return sendSuccess(res, "Candidate detail retrieved", candidate, HttpStatus.OK);
+  };
+
+  getCandidateActivity = async (req: Request, res: Response): Promise<Response> => {
+    const id = requireParam(req.params.id, "Candidate id");
+    const [activityLogs, auditLogs] = await Promise.all([
+      prisma.activityLog.findMany({
+        where: {
+          OR: [{ entityType: "candidate", entityId: id }, { entityType: "job-application" }, { entityType: "interview" }],
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+      prisma.auditLog.findMany({
+        where: {
+          OR: [{ entityType: "candidate", entityId: id }, { entityType: "job-application" }, { entityType: "interview" }],
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+    ]);
+
+    return sendSuccess(
+      res,
+      "Candidate activity retrieved",
+      {
+        activityLogs,
+        auditLogs,
+      },
+      HttpStatus.OK,
+    );
+  };
+
+  updateCandidateStage = async (req: Request, res: Response): Promise<Response> => {
+    const user = currentUser(req);
+    const id = requireParam(req.params.id, "Candidate id");
+    const { jobId, stage, score, tags } = req.body as {
+      jobId?: string;
+      stage?: string;
+      score?: number;
+      tags?: string[];
+    };
+
+    if (!jobId || !stage) {
+      throw new BadRequestError("jobId and stage are required");
+    }
+
+    const job = await prisma.jobPosting.findFirst({ where: { id: jobId, deletedAt: null } });
+    if (!job) throw new NotFoundError("Job not found");
+
+    const candidate = await prisma.candidate.findFirst({ where: { id, deletedAt: null } });
+    if (!candidate) throw new NotFoundError("Candidate not found");
+
+    const pipelineStages = getJobPipelineStages(job);
+    const nextStage = normalizeStage(stage);
+
+    if (!pipelineStages.includes(nextStage)) {
+      throw new BadRequestError(`Stage must be one of: ${pipelineStages.join(", ")}`);
+    }
+
+    const application = await prisma.jobApplication.findUnique({
+      where: { jobId_candidateId: { jobId, candidateId: id } },
+      include: { candidate: true, job: true },
+    });
+
+    if (!application) {
+      throw new NotFoundError("Application not found for this candidate and job");
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const previousStage = application.stage;
+      const nextApplication = await tx.jobApplication.update({
+        where: { id: application.id },
+        data: {
+          stage: nextStage as ApplicationStage,
+          ...(typeof score === "number" ? { score } : {}),
+          ...(Array.isArray(tags) ? { tags } : {}),
+        },
+        include: { candidate: true, job: true },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          actorId: user.id,
+          actorUserId: user.id,
+          actorName: user.userId,
+          action: "candidate.stage.update",
+          entityType: "job-application",
+          entityId: nextApplication.id,
+          entityName: `${nextApplication.candidate.firstName} ${nextApplication.candidate.lastName}`,
+          oldValues: { stage: previousStage },
+          newValues: { stage: nextStage, jobId },
+        },
+      });
+
+      const recipients = await tx.user.findMany({
+        where: {
+          deletedAt: null,
+          OR: [
+            ...(application.job.createdByHrId
+              ? [{ employeeId: application.job.createdByHrId }]
+              : []),
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (recipients.length > 0) {
+        await tx.notification.createMany({
+          data: recipients.map((recipient) => ({
+            userId: recipient.id,
+            type: "CANDIDATE_STAGE",
+            channel: "IN_APP",
+            title: "Candidate stage changed",
+            message: `${candidate.firstName} ${candidate.lastName} moved to ${nextStage}`,
+            body: `${candidate.firstName} ${candidate.lastName} moved to ${nextStage}`,
+            metadata: {
+              candidateId: candidate.id,
+              jobId,
+              previousStage,
+              nextStage,
+            },
+          })),
+        });
+      }
+
+      return nextApplication;
+    });
+
+    return sendSuccess(res, "Candidate stage updated", updated, HttpStatus.OK);
+  };
+
+  addCandidateNote = async (req: Request, res: Response): Promise<Response> => {
+    const user = currentUser(req);
+    const id = requireParam(req.params.id, "Candidate id");
+    const { body } = req.body as { body?: string };
+
+    if (!body || !body.trim()) {
+      throw new BadRequestError("body is required");
+    }
+
+    const candidate = await prisma.candidate.findFirst({ where: { id, deletedAt: null } });
+    if (!candidate) throw new NotFoundError("Candidate not found");
+
+    const note = await prisma.activityLog.create({
+      data: {
+        actorId: user.id,
+        actorUserId: user.id,
+        actorName: user.userId,
+        action: "candidate.note.add",
+        entityType: "candidate",
+        entityId: candidate.id,
+        entityName: `${candidate.firstName} ${candidate.lastName}`,
+        newValues: { note: body.trim() },
+      },
+    });
+
+    return sendSuccess(res, "Candidate note added", note, HttpStatus.CREATED);
   };
 
   // =========================================================================
@@ -246,7 +628,7 @@ export class RecruitmentController {
   };
 
   getCandidateById = async (req: Request, res: Response): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Candidate id");
     const candidate = await prisma.candidate.findFirst({
       where: { id, deletedAt: null },
     });
@@ -299,7 +681,7 @@ export class RecruitmentController {
   };
 
   updateCandidate = async (req: Request, res: Response): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Candidate id");
     const existing = await prisma.candidate.findFirst({
       where: { id, deletedAt: null },
     });
@@ -327,7 +709,7 @@ export class RecruitmentController {
   };
 
   deleteCandidate = async (req: Request, res: Response): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Candidate id");
     const existing = await prisma.candidate.findFirst({
       where: { id, deletedAt: null },
     });
@@ -392,7 +774,7 @@ export class RecruitmentController {
     req: Request,
     res: Response,
   ): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Application id");
     const application = await prisma.jobApplication.findFirst({
       where: { id, deletedAt: null },
       include: { candidate: true, job: true, interviews: true },
@@ -451,7 +833,7 @@ export class RecruitmentController {
     req: Request,
     res: Response,
   ): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Application id");
     const existing = await prisma.jobApplication.findFirst({
       where: { id, deletedAt: null },
     });
@@ -471,7 +853,7 @@ export class RecruitmentController {
     req: Request,
     res: Response,
   ): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Application id");
     const existing = await prisma.jobApplication.findFirst({
       where: { id, deletedAt: null },
     });
@@ -739,7 +1121,7 @@ export class RecruitmentController {
   };
 
   getInterviewById = async (req: Request, res: Response): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Interview id");
     const interview = await prisma.interview.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -818,7 +1200,7 @@ export class RecruitmentController {
   };
 
   updateInterview = async (req: Request, res: Response): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Interview id");
     const existing = await prisma.interview.findFirst({
       where: { id, deletedAt: null },
     });
@@ -865,7 +1247,7 @@ export class RecruitmentController {
   };
 
   deleteInterview = async (req: Request, res: Response): Promise<Response> => {
-    const { id } = req.params;
+    const id = requireParam(req.params.id, "Interview id");
     const existing = await prisma.interview.findFirst({
       where: { id, deletedAt: null },
     });
@@ -936,6 +1318,20 @@ export class RecruitmentController {
         completedCount,
         selectedCount,
         cancelledCount,
+      },
+      HttpStatus.OK,
+    );
+  };
+
+  onboarding = async (_req: Request, res: Response): Promise<Response> => {
+    return sendSuccess(
+      res,
+      "Onboarding recruitment summary retrieved",
+      {
+        items: [],
+        meta: {
+          total: 0,
+        },
       },
       HttpStatus.OK,
     );

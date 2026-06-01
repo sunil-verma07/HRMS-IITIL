@@ -13,7 +13,12 @@ export class OfferLetterController {
   private extractVariables(html: string): string[] {
     const matches = html.matchAll(/\{\{\s*(\w+)\s*\}\}/g);
     const vars = new Set<string>();
-    for (const match of matches) vars.add(match[1]);
+    for (const match of matches) {
+      const variableName = match[1];
+      if (variableName) {
+        vars.add(variableName);
+      }
+    }
     return Array.from(vars);
   }
 
@@ -180,16 +185,22 @@ export class OfferLetterController {
     const htmlContent = typeof request.body.htmlContent === "string" ? this.sanitize(request.body.htmlContent) : undefined;
     const variables = htmlContent ? this.extractVariables(htmlContent) : undefined;
 
+    const updateData: Prisma.TemplateUpdateInput = {
+      ...(typeof request.body.name === "string" ? { name: request.body.name.trim() } : {}),
+      ...(typeof request.body.key === "string" ? { key: request.body.key.trim() } : {}),
+      ...(typeof request.body.cssContent === "string" ? { cssContent: this.sanitize(request.body.cssContent) } : {}),
+      ...(typeof request.body.category === "string" ? { category: request.body.category.trim() } : {}),
+      ...(request.body.isDefault !== undefined ? { isDefault } : {}),
+    };
+
+    if (htmlContent) {
+      updateData.htmlContent = htmlContent;
+      updateData.variables = variables ?? [];
+    }
+
     const template = await prisma.template.update({
       where: { id },
-      data: {
-        ...(typeof request.body.name === "string" ? { name: request.body.name.trim() } : {}),
-        ...(typeof request.body.key === "string" ? { key: request.body.key.trim() } : {}),
-        ...(htmlContent ? { htmlContent, variables } : {}),
-        ...(typeof request.body.cssContent === "string" ? { cssContent: this.sanitize(request.body.cssContent) } : {}),
-        ...(typeof request.body.category === "string" ? { category: request.body.category.trim() } : {}),
-        ...(request.body.isDefault !== undefined ? { isDefault } : {}),
-      },
+      data: updateData,
     });
 
     return sendSuccess(response, "Template updated", template, HttpStatus.OK);

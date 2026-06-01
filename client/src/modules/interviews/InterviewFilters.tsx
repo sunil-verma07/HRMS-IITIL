@@ -40,7 +40,7 @@ function MultiChip({
 }: {
   label: string;
   active: boolean;
-  color?: string;
+  color?: string | undefined;
   onToggle: () => void;
 }) {
   return (

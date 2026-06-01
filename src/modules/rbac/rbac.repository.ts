@@ -13,6 +13,60 @@ import type {
   UpdateRoleDto,
 } from "./rbac.validation";
 
+export type PermissionMatrix = Record<string, Record<string, Record<string, string>>>;
+
+export type PermissionMatrixChange = {
+  roleCode: string;
+  resource: string;
+  action: string;
+  scope: string;
+};
+
+const scopeLevel: Record<string, number> = {
+  none: 0,
+  self: 1,
+  team: 2,
+  department: 3,
+  all: 4,
+};
+
+function parsePermissionToMatrixCell(permission: { code: string; resource?: string | null; action?: string | null; scope?: string | null }): {
+  resource: string;
+  action: string;
+  scope: string;
+} | null {
+  const code = permission.code;
+
+  if (code.includes(':')) {
+    const parts = code.split(':');
+    if (parts.length !== 3) {
+      return null;
+    }
+
+    const [resource, action, scope] = parts;
+    if (!resource || !action || !scope) {
+      return null;
+    }
+
+    return { resource, action, scope };
+  }
+
+  // Legacy dot permissions (for example employee.read) are unscoped and historically behaved like all.
+  if (code.includes('.')) {
+    const parts = code.split('.').filter(Boolean);
+    const resource = permission.resource ?? parts[0];
+    const action = permission.action ?? parts[parts.length - 1];
+
+    if (!resource || !action) {
+      return null;
+    }
+
+    return { resource, action, scope: 'all' };
+  }
+
+  return null;
+}
+
 function toJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
@@ -128,6 +182,52 @@ export class RbacRepository {
     });
   }
 
+  async getPermissionMatrix(): Promise<PermissionMatrix> {
+    const roles = await prisma.role.findMany({
+      where: {
+        deletedAt: null,
+        code: { not: 'SUPER_ADMIN' },
+      },
+      orderBy: { hierarchyLevel: 'asc' },
+      include: {
+        permissions: {
+          where: { permission: { deletedAt: null } },
+          include: {
+            permission: {
+              select: { code: true, resource: true, action: true, scope: true },
+            },
+          },
+        },
+      },
+    });
+
+    const matrix: PermissionMatrix = {};
+
+    for (const role of roles) {
+      matrix[role.code] = {};
+
+      for (const rolePermission of role.permissions) {
+        const parsed = parsePermissionToMatrixCell(rolePermission.permission);
+        if (!parsed) {
+          continue;
+        }
+
+        const { resource, action, scope } = parsed;
+
+        if (!matrix[role.code]?.[resource]) {
+          matrix[role.code]![resource] = {};
+        }
+
+        const current = matrix[role.code]?.[resource]?.[action];
+        if (!current || (scopeLevel[scope] ?? 0) > (scopeLevel[current] ?? 0)) {
+          matrix[role.code]![resource]![action] = scope;
+        }
+      }
+    }
+
+    return matrix;
+  }
+
   createRole(input: CreateRoleDto) {
     return prisma.role.create({
       data: {
@@ -149,14 +249,14 @@ export class RbacRepository {
   ): Promise<void> {
     const role = await prisma.role.findFirst({
       where: { id: roleId, deletedAt: null },
-      select: { id: true, isSystem: true },
+      select: { id: true, code: true, isSystem: true },
     });
 
     if (!role) {
       throw new NotFoundError("Role not found");
     }
 
-    if (role.code === "SUPER_ADMIN") {
+    if (role.isSystem || role.code === "SUPER_ADMIN") {
       throw new BadRequestError("Super Admin permissions cannot be changed");
     }
 
@@ -182,6 +282,108 @@ export class RbacRepository {
           newValues: { permissionId, enabled: input.enabled },
         },
       });
+    });
+  }
+
+  async savePermissionMatrix(changes: PermissionMatrixChange[], actorUserId?: string): Promise<void> {
+    if (changes.length === 0) {
+      return;
+    }
+
+    const normalizedByKey = new Map<string, PermissionMatrixChange>();
+    for (const change of changes) {
+      const key = `${change.roleCode}::${change.resource}::${change.action}`;
+      normalizedByKey.set(key, {
+        roleCode: change.roleCode.trim(),
+        resource: change.resource.trim(),
+        action: change.action.trim(),
+        scope: change.scope.trim(),
+      });
+    }
+
+    const normalizedChanges = [...normalizedByKey.values()];
+    const roleCodes = [...new Set(normalizedChanges.map((change) => change.roleCode))];
+
+    const roles = await prisma.role.findMany({
+      where: {
+        code: { in: roleCodes },
+        deletedAt: null,
+      },
+      select: { id: true, code: true },
+    });
+
+    const roleByCode = new Map(roles.map((role) => [role.code, role]));
+    const missingRoles = roleCodes.filter((code) => !roleByCode.has(code));
+    if (missingRoles.length > 0) {
+      throw new NotFoundError(`Role not found: ${missingRoles.join(', ')}`);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      for (const change of normalizedChanges) {
+        const role = roleByCode.get(change.roleCode);
+        if (!role) {
+          throw new NotFoundError(`Role not found: ${change.roleCode}`);
+        }
+
+        const existingPermissions = await tx.permission.findMany({
+          where: {
+            deletedAt: null,
+            resource: change.resource,
+            action: change.action,
+          },
+          select: { id: true },
+        });
+
+        await tx.rolePermission.deleteMany({
+          where: {
+            roleId: role.id,
+            permissionId: { in: existingPermissions.map((permission) => permission.id) },
+          },
+        });
+
+        if (change.scope !== 'none') {
+          const permissionCode = `${change.resource}:${change.action}:${change.scope}`;
+          let permission = await tx.permission.findFirst({
+            where: { code: permissionCode, deletedAt: null },
+          });
+
+          if (!permission) {
+            permission = await tx.permission.create({
+              data: {
+                code: permissionCode,
+                resource: change.resource,
+                action: change.action,
+                scope: change.scope,
+                description: `${change.action} ${change.resource} with ${change.scope} scope`,
+              },
+            });
+          }
+
+          await tx.rolePermission.upsert({
+            where: {
+              roleId_permissionId: {
+                roleId: role.id,
+                permissionId: permission.id,
+              },
+            },
+            update: {},
+            create: {
+              roleId: role.id,
+              permissionId: permission.id,
+            },
+          });
+        }
+
+        await tx.activityLog.create({
+          data: {
+            actorUserId: actorUserId ?? null,
+            action: 'ROLE_PERMISSION_MATRIX_CHANGE_SAVED',
+            entityType: 'Role',
+            entityId: role.id,
+            newValues: toJson(change),
+          },
+        });
+      }
     });
   }
 

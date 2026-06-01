@@ -45,6 +45,7 @@ export async function authenticate(request: Request, _response: Response, next: 
             deletedAt: true,
             employee: {
               select: {
+                departmentId: true,
                 department: true
               }
             }
@@ -63,6 +64,7 @@ export async function authenticate(request: Request, _response: Response, next: 
       id: session.user.id,
       userId: session.user.userId,
       ...(session.user.employeeId ? { employeeId: session.user.employeeId } : {}),
+      ...(session.user.employee?.departmentId ? { departmentId: session.user.employee.departmentId } : {}),
       ...(session.user.employee?.department ? { department: session.user.employee.department } : {}),
       sessionId: session.id,
       roles: accessProfile.roles,

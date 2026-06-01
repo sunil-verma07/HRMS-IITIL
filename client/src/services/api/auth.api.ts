@@ -13,6 +13,11 @@ export const authApi = {
     return response.data.data;
   },
 
+  async refresh(refreshToken: string): Promise<AuthResult> {
+    const response = await httpClient.post<ApiResponse<AuthResult>>(endpoints.auth.refresh, { refreshToken });
+    return response.data.data;
+  },
+
   async logout(refreshToken?: string): Promise<void> {
     await httpClient.post(endpoints.auth.logout, refreshToken ? { refreshToken } : {});
   },
